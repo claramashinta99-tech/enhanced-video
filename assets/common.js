@@ -11,5 +11,12 @@ function applyBrand(){
   if(document.title.includes('Reyval'))document.title=document.title.replace(/Reyval/g,'RVL');
   const d=document.querySelector('meta[name="description"]');if(d&&d.content.includes('Reyval'))d.content=d.content.replace(/Reyval/g,'RVL');
 }
+function hideWrongClarityBgm(){
+  if(!location.pathname.includes('/clarity'))return;
+  const style=document.createElement('style');
+  style.id='hide-clarity-bgm';
+  style.textContent='.bgm-section{display:none!important}';
+  document.head.appendChild(style);
+}
 function setLang(lang){localStorage.setItem('reyval-lang',lang);document.documentElement.lang=lang;document.querySelectorAll('[data-i18n]').forEach(el=>{const key=el.dataset.i18n;if(translations[lang]?.[key])el.textContent=translations[lang][key]});document.querySelectorAll('[data-i18n-placeholder]').forEach(el=>{const key=el.dataset.i18nPlaceholder;if(translations[lang]?.[key])el.placeholder=translations[lang][key]});document.querySelectorAll('[data-lang]').forEach(btn=>btn.classList.toggle('active',btn.dataset.lang===lang));applyBrand();window.dispatchEvent(new CustomEvent('reyval:lang',{detail:{lang}}))}
-document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('[data-lang]').forEach(btn=>btn.addEventListener('click',()=>setLang(btn.dataset.lang)));setLang(getLang());applyBrand()});
+document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('[data-lang]').forEach(btn=>btn.addEventListener('click',()=>setLang(btn.dataset.lang)));setLang(getLang());applyBrand();hideWrongClarityBgm()});
