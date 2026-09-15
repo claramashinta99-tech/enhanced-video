@@ -1,11 +1,27 @@
 const translations={
   id:{
-    tools:'Tools',homeBadge:'PRIVATE • CEPAT • SEDERHANA',homeTitle:'Tools yang lu butuhin, di satu tempat.',homeSub:'Mulai dari video optimizer TikTok sampai downloader. Dibuat sederhana, cepat, dan enak dipakai dari HP maupun desktop.',openClarity:'Buka Clarity',viewTools:'Lihat semua tools',ourTools:'Tools Reyval',toolsSub:'Satu rumah untuk tools yang kepake. Yang belum siap bakal ditandai Coming Soon.',clarityDesc:'Siapkan video TikTok tanpa re-encode yang nggak perlu. Fokus ke kualitas sumber.',tiktokDesc:'Downloader TikTok yang simpel dan cepat. API sedang disiapkan.',youtubeDesc:'Downloader YouTube dengan pilihan format. API sedang disiapkan.',available:'TERSEDIA',soon:'COMING SOON',privacy:'Privasi dulu',privacyDesc:'Clarity memproses file di browser. Video lu nggak dikirim ke server Reyval.',mobile:'Mobile friendly',mobileDesc:'Tampilan dibuat nyaman untuk HP, tablet, dan desktop.',simple:'Tanpa ribet',simpleDesc:'UI ringkas. Pilih tool, lakukan tugasnya, selesai.',footer:'Reyval Tools · Dibuat untuk workflow yang lebih cepat.',back:'Kembali ke Reyval',comingTitle:'Coming Soon',comingSub:'Halaman ini sudah siap. Fitur download akan diaktifkan setelah API/backend-nya dipilih.',notify:'Kembali ke homepage'
+    tools:'Tools',homeBadge:'REYVAL TOOLS',homeTitle:'Tools buat video, tanpa ribet.',homeSub:'Clarity udah aktif. Downloader TikTok dan YouTube nyusul.',openClarity:'Buka Clarity',viewTools:'Lihat tools',ourTools:'Pilih tool',toolsSub:'Satu tempat buat workflow media yang sering kepake.',clarityDesc:'Siapkan video TikTok tanpa encode ulang yang nggak perlu.',tiktokDesc:'Simpan video TikTok langsung dari link.',youtubeDesc:'Video atau audio dari YouTube, tinggal pilih format.',available:'AKTIF',soon:'SEGERA',openTool:'Buka tool',previewTool:'Lihat halaman',privacy:'Lokal',privacyDesc:'Clarity jalan di browser. File video tetap di perangkat lu.',mobile:'Responsif',mobileDesc:'Nyaman dipakai dari HP sampai desktop.',simple:'Ringkas',simpleDesc:'Nggak ada menu yang nggak perlu.',back:'Balik ke Reyval',tiktokPageSub:'Simpan video TikTok langsung dari link.',youtubePageSub:'Download video atau audio YouTube dari satu link.',pasteTikTok:'Tempel link TikTok',pasteYouTube:'Tempel link YouTube',download:'Download',comingShort:'Segera hadir',comingNote:'Belum tersedia. Lagi disiapin.',home:'Homepage'
   },
   en:{
-    tools:'Tools',homeBadge:'PRIVATE • FAST • SIMPLE',homeTitle:'Useful tools, all in one place.',homeSub:'From TikTok video optimization to downloaders. Simple, fast, and comfortable on mobile or desktop.',openClarity:'Open Clarity',viewTools:'View all tools',ourTools:'Reyval Tools',toolsSub:'One home for practical tools. Anything not ready yet is clearly marked Coming Soon.',clarityDesc:'Prepare TikTok videos without unnecessary re-encoding. Keep the source quality first.',tiktokDesc:'A simple, fast TikTok downloader. API is being prepared.',youtubeDesc:'YouTube downloader with format options. API is being prepared.',available:'AVAILABLE',soon:'COMING SOON',privacy:'Privacy first',privacyDesc:'Clarity processes files in your browser. Your video is not sent to Reyval servers.',mobile:'Mobile friendly',mobileDesc:'Designed to work comfortably on phones, tablets, and desktop.',simple:'No clutter',simpleDesc:'A compact UI. Pick a tool, get the job done, move on.',footer:'Reyval Tools · Built for a faster workflow.',back:'Back to Reyval',comingTitle:'Coming Soon',comingSub:'This page is ready. Downloads will be enabled once the API/backend is selected.',notify:'Back to homepage'
+    tools:'Tools',homeBadge:'REYVAL TOOLS',homeTitle:'Video tools, without the clutter.',homeSub:'Clarity is live. TikTok and YouTube downloaders are next.',openClarity:'Open Clarity',viewTools:'View tools',ourTools:'Choose a tool',toolsSub:'One place for the media tasks you actually use.',clarityDesc:'Prepare TikTok videos without unnecessary re-encoding.',tiktokDesc:'Save TikTok videos straight from a link.',youtubeDesc:'Video or audio from YouTube, choose the format.',available:'LIVE',soon:'SOON',openTool:'Open tool',previewTool:'View page',privacy:'Local',privacyDesc:'Clarity runs in your browser. Your video stays on your device.',mobile:'Responsive',mobileDesc:'Comfortable on mobile and desktop.',simple:'Simple',simpleDesc:'No unnecessary menus.',back:'Back to Reyval',tiktokPageSub:'Save TikTok videos straight from a link.',youtubePageSub:'Download YouTube video or audio from one link.',pasteTikTok:'Paste TikTok link',pasteYouTube:'Paste YouTube link',download:'Download',comingShort:'Coming soon',comingNote:'Not available yet. In progress.',home:'Homepage'
   }
 };
 function getLang(){return localStorage.getItem('reyval-lang')||'id'}
-function setLang(lang){localStorage.setItem('reyval-lang',lang);document.documentElement.lang=lang;document.querySelectorAll('[data-i18n]').forEach(el=>{const key=el.dataset.i18n;if(translations[lang]?.[key])el.textContent=translations[lang][key]});document.querySelectorAll('[data-lang]').forEach(btn=>btn.classList.toggle('active',btn.dataset.lang===lang));window.dispatchEvent(new CustomEvent('reyval:lang',{detail:{lang}}))}
-document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('[data-lang]').forEach(btn=>btn.addEventListener('click',()=>setLang(btn.dataset.lang)));setLang(getLang())});
+function setLang(lang){
+  localStorage.setItem('reyval-lang',lang);
+  document.documentElement.lang=lang;
+  document.querySelectorAll('[data-i18n]').forEach(el=>{
+    const key=el.dataset.i18n;
+    if(translations[lang]?.[key]) el.textContent=translations[lang][key];
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el=>{
+    const key=el.dataset.i18nPlaceholder;
+    if(translations[lang]?.[key]) el.placeholder=translations[lang][key];
+  });
+  document.querySelectorAll('[data-lang]').forEach(btn=>btn.classList.toggle('active',btn.dataset.lang===lang));
+  window.dispatchEvent(new CustomEvent('reyval:lang',{detail:{lang}}));
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  document.querySelectorAll('[data-lang]').forEach(btn=>btn.addEventListener('click',()=>setLang(btn.dataset.lang)));
+  setLang(getLang());
+});
