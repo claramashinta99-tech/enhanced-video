@@ -3,10 +3,10 @@ let file=null,previewURL=null,resultURL=null,mode='reference',target='feed',ffmp
 
 const copy={
   id:{
-    sub:'Biar file yang lu upload tetap sedekat mungkin sama sumbernya.',source:'Video',local:'PROSES LOKAL',drop:'Pilih video',dropSub:'MP4 atau MOV · bisa drag & drop',target:'Preview untuk',targetHint:'Cuma mengubah panduan preview.',safeTop:'Area aman',safeHint:'Biar UI TikTok nggak nutup bagian penting.',mode:'Mode',ref:'Rapihin container MP4 dan metadata tanpa encode ulang.',hq:'Salin stream asli ke MP4 + fast start. Kualitas sumber tetap.',turbo:'Tanpa proses. File asli langsung dipakai.',privacy:'Video tetap di perangkat lu.',process:'Siapkan video',preview:'Preview',empty:'Pilih video dulu.',safe:'Area aman',original:'Asli',result:'Hasil',resolution:'Resolusi',duration:'Durasi',size:'Ukuran',modeSpec:'Mode',notice:'TikTok tetap bisa melakukan kompresi setelah upload. Clarity cuma menghindari encode ulang yang nggak perlu sebelum file dikirim.',loading:'Menyiapkan engine lokal…',processingRef:'Merapikan MP4…',processingHq:'Menyalin stream asli…',ready:'Selesai.',download:'Download MP4 ↓',downloadOriginal:'Download file ↓',failed:'Proses gagal. Coba Turbo atau pakai sumber MP4/H.264.',copied:'File asli, tanpa perubahan.',remuxed:'Tanpa encode ulang.',invalid:'Pilih file MP4 atau MOV.',modeNames:{reference:'Referensi',hq:'HQ',turbo:'Turbo'}
+    sub:'Biar file yang lu upload tetap sedekat mungkin sama sumbernya.',source:'Video',local:'PROSES LOKAL',drop:'Pilih video',dropSub:'MP4 atau MOV · bisa drag & drop',target:'Preview untuk',targetHint:'Cuma mengubah panduan preview.',safeTop:'Area aman',safeHint:'Biar UI TikTok nggak nutup bagian penting.',mode:'Mode',ref:'Rapihin container MP4 dan metadata tanpa encode ulang.',hq:'Salin stream asli ke MP4 + fast start. Kualitas sumber tetap.',turbo:'Tanpa proses. File asli langsung dipakai.',privacy:'Video tetap di perangkat lu.',process:'Siapkan video',preview:'Preview',empty:'Pilih video dulu.',safe:'Area aman',original:'Asli',result:'Hasil',resolution:'Resolusi',duration:'Durasi',size:'Ukuran',modeSpec:'Mode',notice:'TikTok tetap bisa melakukan kompresi setelah upload. Clarity cuma menghindari encode ulang yang nggak perlu sebelum file dikirim.',loading:'Menyiapkan engine lokal…',processingRef:'Merapikan MP4…',processingHq:'Menyalin stream asli…',ready:'Selesai.',download:'Download MP4 ↓',downloadOriginal:'Download file ↓',failed:'Engine lokal gagal dimuat. Refresh halaman lalu coba lagi, atau pakai Turbo.',copied:'File asli, tanpa perubahan.',remuxed:'Tanpa encode ulang.',invalid:'Pilih file MP4 atau MOV.',modeNames:{reference:'Referensi',hq:'HQ',turbo:'Turbo'}
   },
   en:{
-    sub:'Keep the upload as close to the source file as possible.',source:'Video',local:'LOCAL PROCESSING',drop:'Choose a video',dropSub:'MP4 or MOV · drag & drop works too',target:'Preview for',targetHint:'Only changes the preview guide.',safeTop:'Safe area',safeHint:'Keeps important content clear of TikTok UI.',mode:'Mode',ref:'Clean up the MP4 container and metadata without re-encoding.',hq:'Copy the original streams into MP4 + fast start. Source quality stays intact.',turbo:'No processing. Use the original file as-is.',privacy:'Your video stays on your device.',process:'Prepare video',preview:'Preview',empty:'Choose a video first.',safe:'Safe area',original:'Original',result:'Result',resolution:'Resolution',duration:'Duration',size:'Size',modeSpec:'Mode',notice:'TikTok may still compress the file after upload. Clarity only avoids unnecessary re-encoding before the upload.',loading:'Loading local engine…',processingRef:'Cleaning up MP4…',processingHq:'Copying original streams…',ready:'Done.',download:'Download MP4 ↓',downloadOriginal:'Download file ↓',failed:'Processing failed. Try Turbo or use an MP4/H.264 source.',copied:'Original file, unchanged.',remuxed:'No re-encoding.',invalid:'Choose an MP4 or MOV file.',modeNames:{reference:'Reference',hq:'HQ',turbo:'Turbo'}
+    sub:'Keep the upload as close to the source file as possible.',source:'Video',local:'LOCAL PROCESSING',drop:'Choose a video',dropSub:'MP4 or MOV · drag & drop works too',target:'Preview for',targetHint:'Only changes the preview guide.',safeTop:'Safe area',safeHint:'Keeps important content clear of TikTok UI.',mode:'Mode',ref:'Clean up the MP4 container and metadata without re-encoding.',hq:'Copy the original streams into MP4 + fast start. Source quality stays intact.',turbo:'No processing. Use the original file as-is.',privacy:'Your video stays on your device.',process:'Prepare video',preview:'Preview',empty:'Choose a video first.',safe:'Safe area',original:'Original',result:'Result',resolution:'Resolution',duration:'Duration',size:'Size',modeSpec:'Mode',notice:'TikTok may still compress the file after upload. Clarity only avoids unnecessary re-encoding before the upload.',loading:'Loading local engine…',processingRef:'Cleaning up MP4…',processingHq:'Copying original streams…',ready:'Done.',download:'Download MP4 ↓',downloadOriginal:'Download file ↓',failed:'The local engine could not load. Refresh and try again, or use Turbo.',copied:'Original file, unchanged.',remuxed:'No re-encoding.',invalid:'Choose an MP4 or MOV file.',modeNames:{reference:'Reference',hq:'HQ',turbo:'Turbo'}
   }
 };
 
@@ -20,7 +20,7 @@ window.addEventListener('reyval:lang',applyLang);document.addEventListener('DOMC
 
 function formatBytes(n){if(!n&&n!==0)return'—';const u=['B','KB','MB','GB'];let i=0,v=n;while(v>=1024&&i<u.length-1){v/=1024;i++}return `${v.toFixed(i?1:0)} ${u[i]}`}
 function formatDuration(s){if(!isFinite(s))return'—';const m=Math.floor(s/60),sec=Math.round(s%60);return `${m}:${String(sec).padStart(2,'0')}`}
-function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),2300)}
+function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),2600)}
 function setProgress(pct,text){const safe=Math.max(0,Math.min(100,Math.round(pct)));$('#progress-fill').style.width=safe+'%';$('#progress-pct').textContent=safe+'%';if(text)$('#progress-text').textContent=text}
 
 function showPreview(source){
@@ -57,13 +57,38 @@ function setSafeArea(on){
 $('#safe-toggle').addEventListener('click',()=>setSafeArea(!$('#safe-toggle').classList.contains('on')));$$('#safe-segment button').forEach(btn=>btn.addEventListener('click',()=>setSafeArea(btn.dataset.safe==='on')));
 $$('#preview-source-toggle button').forEach(btn=>btn.addEventListener('click',()=>showPreview(btn.dataset.source)));
 
-async function blobURL(url,type){const r=await fetch(url);if(!r.ok)throw new Error(`HTTP ${r.status}`);const b=await r.blob();return URL.createObjectURL(new Blob([b],{type}))}
+async function toBlobURL(url,mimeType){
+  const r=await fetch(url,{cache:'force-cache'});if(!r.ok)throw new Error(`HTTP ${r.status} ${url}`);const b=await r.blob();return URL.createObjectURL(new Blob([b],{type:mimeType}));
+}
+async function toPatchedBlobURL(url,mimeType){
+  const r=await fetch(url,{cache:'force-cache'});if(!r.ok)throw new Error(`HTTP ${r.status} ${url}`);let js=await r.text();
+  js=js.replace('new URL(e.p+e.u(814),e.b)','r.workerLoadURL');
+  return URL.createObjectURL(new Blob([js],{type:mimeType}));
+}
+async function loadFFmpegFrom(baseMain,baseCore){
+  if(!window.FFmpegWASM){
+    const mainURL=await toPatchedBlobURL(`${baseMain}/ffmpeg.js`,'text/javascript');
+    await import(mainURL);
+  }
+  if(!window.FFmpegWASM?.FFmpeg)throw new Error('FFmpegWASM global missing');
+  ffmpeg=new window.FFmpegWASM.FFmpeg();
+  ffmpeg.on('progress',({progress})=>setProgress(Math.max(8,Math.min(96,(progress||0)*100))));
+  const workerLoadURL=await toBlobURL(`${baseMain}/814.ffmpeg.js`,'text/javascript');
+  const coreURL=await toBlobURL(`${baseCore}/ffmpeg-core.js`,'text/javascript');
+  const wasmURL=await toBlobURL(`${baseCore}/ffmpeg-core.wasm`,'application/wasm');
+  await ffmpeg.load({workerLoadURL,coreURL,wasmURL});
+}
 async function ensureFFmpeg(){
   if(ffmpegLoaded)return;
-  const {FFmpeg}=await import('https://unpkg.com/@ffmpeg/ffmpeg@0.12.15/dist/esm/index.js');ffmpeg=new FFmpeg();
-  ffmpeg.on('progress',({progress})=>setProgress(Math.max(8,Math.min(96,progress*100))));
-  const base='https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd';
-  await ffmpeg.load({coreURL:await blobURL(`${base}/ffmpeg-core.js`,'text/javascript'),wasmURL:await blobURL(`${base}/ffmpeg-core.wasm`,'application/wasm')});ffmpegLoaded=true;
+  const sources=[
+    ['https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.6/dist/umd','https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.3/dist/umd'],
+    ['https://unpkg.com/@ffmpeg/ffmpeg@0.12.6/dist/umd','https://unpkg.com/@ffmpeg/core@0.12.3/dist/umd']
+  ];
+  let lastErr;
+  for(const [main,core] of sources){
+    try{await loadFFmpegFrom(main,core);ffmpegLoaded=true;return}catch(err){console.warn('FFmpeg source failed',main,err);lastErr=err;try{ffmpeg?.terminate?.()}catch{}ffmpeg=null}
+  }
+  throw lastErr||new Error('Unable to load FFmpeg');
 }
 function outputName(){const base=file.name.replace(/\.[^.]+$/,'');return `${base}-${mode}.mp4`}
 
@@ -85,6 +110,6 @@ $('#process').addEventListener('click',async()=>{
       setProgress(100,mode==='reference'?c.processingRef:c.processingHq);
     }
     resultURL=URL.createObjectURL(blob);const dl=$('#download');dl.href=resultURL;dl.download=mode==='turbo'?file.name:outputName();dl.textContent=mode==='turbo'?c.downloadOriginal:c.download;$('#result-title').textContent=c.ready;$('#result-meta').textContent=`${mode==='turbo'?c.copied:c.remuxed} · ${formatBytes(blob.size)}`;$('#result').classList.add('show');$('#show-result').disabled=false;
-  }catch(err){console.error(err);toast(c.failed);$('#progress-text').textContent=c.failed}
+  }catch(err){console.error(err);toast(c.failed);$('#progress-text').textContent=c.failed;setProgress(0,c.failed)}
   finally{busy=false;$('#process').disabled=!file}
 });
