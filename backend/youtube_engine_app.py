@@ -4,6 +4,8 @@ import re
 import subprocess
 import sys
 import time
+import urllib.parse
+import urllib.request
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
@@ -18,6 +20,7 @@ legacy = base.legacy
 _ORIGINAL_BASE_OPTS = legacy.base_opts
 _ANSI = re.compile(r'\x1b\[[0-9;]*m')
 _SELFTEST_URL = 'https://www.youtube.com/watch?v=hLKiVtoD83k'
+_KNOWN_URL = 'https://www.youtube.com/watch?v=9_0Dk2B2zmA'
 
 
 def _clean_text(value, limit=420):
@@ -32,7 +35,6 @@ def _clean_error(exc):
 
 
 def youtube_attempts():
-    """Current YouTube fallbacks: mweb+PO first, cookie only when needed."""
     attempts = [
         {'name': 'mweb-pot-public', 'clients': ['mweb'], 'cookie': False},
         {'name': 'default-public', 'clients': ['default'], 'cookie': False},
@@ -98,7 +100,6 @@ def _strategy_by_name(name):
 
 
 def _cli_extract(strategy, url=_SELFTEST_URL, hard_timeout=12):
-    """Run one yt-dlp client in a killable subprocess for Render diagnostics."""
     clients = ','.join(strategy.get('clients') or ['default'])
     cmd = [
         sys.executable, '-m', 'yt_dlp',
@@ -118,15 +119,8 @@ def _cli_extract(strategy, url=_SELFTEST_URL, hard_timeout=12):
 
     started = time.monotonic()
     try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=hard_timeout,
-            check=False,
-            env=None,
-        )
-    except subprocess.TimeoutExpired as exc:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=hard_timeout, check=False)
+    except subprocess.TimeoutExpired:
         return {
             'ok': False,
             'timeout': True,
@@ -147,12 +141,7 @@ def _cli_extract(strategy, url=_SELFTEST_URL, hard_timeout=12):
     try:
         info = json.loads(proc.stdout)
     except Exception as exc:
-        return {
-            'ok': False,
-            'timeout': False,
-            'seconds': seconds,
-            'error': f'json parse failed: {_clean_text(exc)}',
-        }
+        return {'ok': False, 'timeout': False, 'seconds': seconds, 'error': f'json parse failed: {_clean_text(exc)}'}
 
     heights = sorted({
         int(item.get('height') or 0)
@@ -170,10 +159,57 @@ def _cli_extract(strategy, url=_SELFTEST_URL, hard_timeout=12):
     }
 
 
+def _timed_http(url, timeout=7):
+    started = time.monotonic()
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': legacy.YOUTUBE_UA})
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            data = response.read(4096)
+            return {
+                'ok': 200 <= response.status < 400,
+                'status': response.status,
+                'seconds': round(time.monotonic() - started, 2),
+                'bytes': len(data),
+            }
+    except Exception as exc:
+        return {
+            'ok': False,
+            'seconds': round(time.monotonic() - started, 2),
+            'error': _clean_error(exc),
+        }
+
+
+def _network_selftest():
+    started = time.monotonic()
+    try:
+        proc = subprocess.run(
+            [sys.executable, '-m', 'yt_dlp', '--version'],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        startup = {
+            'ok': proc.returncode == 0,
+            'seconds': round(time.monotonic() - started, 2),
+            'value': _clean_text(proc.stdout or proc.stderr, 80),
+        }
+    except Exception as exc:
+        startup = {'ok': False, 'seconds': round(time.monotonic() - started, 2), 'error': _clean_error(exc)}
+
+    encoded = urllib.parse.quote(_KNOWN_URL, safe='')
+    return {
+        'yt_dlp_startup': startup,
+        'youtube_watch': _timed_http(_KNOWN_URL),
+        'youtube_oembed': _timed_http(f'https://www.youtube.com/oembed?url={encoded}&format=json'),
+        'pot_provider': legacy.pot_provider_status(),
+    }
+
+
 legacy.base_opts = base_opts
 legacy.youtube_attempts = youtube_attempts
 legacy.extract_info_sync = extract_info_sync
-legacy.APP_VERSION = '1.15.2'
+legacy.APP_VERSION = '1.15.3'
 app.version = legacy.APP_VERSION
 
 
@@ -195,3 +231,8 @@ async def youtube_strategy_selftest(strategy_name: str):
         raise HTTPException(404, 'Unknown YouTube strategy')
     result = await asyncio.to_thread(_cli_extract, strategy)
     return {'strategy': strategy_name, **result}
+
+
+@app.get('/api/youtube/nettest')
+async def youtube_network_selftest():
+    return await asyncio.to_thread(_network_selftest)
