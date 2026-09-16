@@ -1,0 +1,67 @@
+name: ChatGPT verify TikTok HD
+
+on:
+  push:
+    branches: [chatgpt/verify-tiktok-hd]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      API: https://enhanced-video-production.up.railway.app
+      TIKTOK_URL: https://www.tiktok.com/@bukanpidel1/video/7669610923919363349
+    steps:
+      - name: Wait for Railway deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 40); do
+            BODY=$(curl -fsS -L --max-time 20 "$API/health" || true)
+            echo "health[$i]=$BODY"
+            VER=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("version",""))' "$BODY" 2>/dev/null || true)
+            [ "$VER" = "1.16.0" ] && exit 0
+            sleep 6
+          done
+          exit 1
+
+      - name: Verify Normal and HD choices
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -L --max-time 90 -H 'Content-Type: application/json' \
+            -d "{\"url\":\"$TIKTOK_URL\"}" "$API/api/info" | tee /tmp/info.json
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/info.json'))
+          choices=x.get('choices') or []
+          print({'version_target':'1.16.0','id':x.get('id'),'choices':choices})
+          assert x.get('platform') == 'tiktok'
+          assert [c.get('id') for c in choices] == ['best','2160']
+          assert choices[0].get('label') == 'Normal'
+          assert (choices[1].get('label') or '').startswith('HD')
+          PY
+
+      - name: Verify HD direct download
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' \
+            -d "{\"url\":\"$TIKTOK_URL\",\"quality\":\"2160\"}" "$API/api/jobs" | tee /tmp/job.json
+          JOB=$(python -c 'import json; print(json.load(open("/tmp/job.json"))["job_id"])')
+          for i in $(seq 1 90); do
+            BODY=$(curl -fsS -L --max-time 20 "$API/api/jobs/$JOB")
+            echo "$BODY"
+            STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
+            if [ "$STATE" = ready ]; then
+              python -c 'import json,sys; x=json.loads(sys.argv[1]); assert "_hd" in (x.get("filename") or "").lower(), x' "$BODY"
+              curl -fsS -L --max-time 60 -o /tmp/tiktok-hd.mp4 "$API/api/jobs/$JOB/file"
+              BYTES=$(wc -c < /tmp/tiktok-hd.mp4)
+              echo "hd_bytes=$BYTES"
+              test "$BYTES" -gt 100000
+              exit 0
+            fi
+            [ "$STATE" = error ] && exit 1
+            sleep 1
+          done
+          exit 1
