@@ -1,4 +1,4 @@
-name: RVL Railway Shorts smoke
+name: RVL Railway all-media smoke
 
 on:
   push:
@@ -8,26 +8,18 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     env:
       API: https://enhanced-video-production.up.railway.app
       SHORT_URL: https://www.youtube.com/shorts/Xh7I5J8eDQY
+      YT_URL: https://www.youtube.com/watch?v=jNQXAC9IVRw
+      TIKTOK_URL: https://www.tiktok.com/@scout2015/video/6718335390845095173
     steps:
-      - name: Diagnose public endpoint
+      - name: Health
         shell: bash
         run: |
           set -euo pipefail
-          for path in / /health; do
-            echo "=== $path ==="
-            code=$(curl -sS -L --max-time 30 -D /tmp/headers -o /tmp/body -w '%{http_code}' "$API$path" || true)
-            echo "http=$code bytes=$(wc -c < /tmp/body 2>/dev/null || echo 0)"
-            cat /tmp/headers || true
-            echo '--- body ---'
-            head -c 3000 /tmp/body || true
-            echo
-          done
-          code=$(curl -sS -L --max-time 30 -o /tmp/health.json -w '%{http_code}' "$API/health")
-          test "$code" = 200
+          curl -fsS -L --max-time 30 "$API/health" | tee /tmp/health.json
           python - <<'PY'
           import json
           x=json.load(open('/tmp/health.json'))
@@ -35,63 +27,69 @@ jobs:
           assert x.get('ok') is True
           PY
 
-      - name: Read Short metadata
+      - name: Shorts end-to-end
         shell: bash
         run: |
           set -euo pipefail
-          START=$(date +%s)
-          curl -fsS -L --max-time 45 -H 'Content-Type: application/json' \
-            -d "{\"url\":\"$SHORT_URL\"}" "$API/api/info" | tee /tmp/info.json
-          echo
-          echo "info_seconds=$(($(date +%s)-START))"
+          curl -fsS -L --max-time 45 -H 'Content-Type: application/json' -d "{\"url\":\"$SHORT_URL\"}" "$API/api/info" | tee /tmp/short-info.json
+          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$SHORT_URL\",\"quality\":\"best\"}" "$API/api/jobs" | tee /tmp/short-job.json
+          JOB=$(python -c 'import json; print(json.load(open("/tmp/short-job.json"))["job_id"])')
+          for i in $(seq 1 50); do
+            BODY=$(curl -fsS -L --max-time 20 "$API/api/jobs/$JOB")
+            STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
+            echo "$BODY"
+            [ "$STATE" = ready ] && break
+            [ "$STATE" = error ] && exit 1
+            sleep 1
+          done
+          curl -fsS -L --max-time 45 -r 0-131071 -o /tmp/short.bin "$API/api/jobs/$JOB/file"
+          test $(wc -c < /tmp/short.bin) -gt 10000
+
+      - name: YouTube video end-to-end
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -L --max-time 45 -H 'Content-Type: application/json' -d "{\"url\":\"$YT_URL\"}" "$API/api/info" | tee /tmp/yt-info.json
           python - <<'PY'
           import json
-          x=json.load(open('/tmp/info.json'))
-          print('INFO', {k:x.get(k) for k in ['platform','id','title','duration','max_height','choices']})
-          assert x.get('id') == 'Xh7I5J8eDQY'
+          x=json.load(open('/tmp/yt-info.json'))
+          print('YT', {k:x.get(k) for k in ['id','title','duration','max_height','choices']})
+          assert x.get('id') == 'jNQXAC9IVRw'
           assert x.get('choices')
           PY
-
-      - name: Create download job
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' \
-            -d "{\"url\":\"$SHORT_URL\",\"quality\":\"best\"}" "$API/api/jobs" | tee /tmp/job.json
-          echo
-          python - <<'PY' >> "$GITHUB_ENV"
-          import json
-          x=json.load(open('/tmp/job.json'))
-          print('JOB_ID='+x['job_id'])
-          PY
-
-      - name: Wait until ready
-        shell: bash
-        run: |
-          set -euo pipefail
-          START=$(date +%s)
+          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$YT_URL\",\"quality\":\"best\"}" "$API/api/jobs" | tee /tmp/yt-job.json
+          JOB=$(python -c 'import json; print(json.load(open("/tmp/yt-job.json"))["job_id"])')
           for i in $(seq 1 60); do
-            BODY=$(curl -fsS -L --max-time 20 "$API/api/jobs/$JOB_ID")
-            echo "$BODY"
+            BODY=$(curl -fsS -L --max-time 20 "$API/api/jobs/$JOB")
             STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
-            if [ "$STATE" = ready ]; then
-              echo "download_ready_seconds=$(($(date +%s)-START))"
-              exit 0
-            fi
-            if [ "$STATE" = error ]; then
-              echo "$BODY" >&2
-              exit 1
-            fi
-            sleep 2
+            echo "$BODY"
+            [ "$STATE" = ready ] && break
+            [ "$STATE" = error ] && exit 1
+            sleep 1
           done
-          echo 'job timed out' >&2
-          exit 1
+          curl -fsS -L --max-time 45 -r 0-131071 -o /tmp/yt.bin "$API/api/jobs/$JOB/file"
+          test $(wc -c < /tmp/yt.bin) -gt 10000
 
-      - name: Fetch output bytes
+      - name: MP3 fast path
         shell: bash
         run: |
           set -euo pipefail
-          code=$(curl -sS -L --max-time 60 -r 0-524287 -o /tmp/short.bin -w '%{http_code}' "$API/api/jobs/$JOB_ID/file")
-          bytes=$(wc -c < /tmp/short.bin)
-          echo "file_http=$code bytes=$bytes"
-          test "$bytes" -gt 10000
+          curl -fsS -L --max-time 45 -H 'Content-Type: application/json' -d "{\"url\":\"$YT_URL\"}" "$API/api/mp3/info" | tee /tmp/mp3-info.json
+          curl -fsS -L --max-time 45 -H 'Content-Type: application/json' -d "{\"url\":\"$YT_URL\"}" "$API/api/audio/prepare" | tee /tmp/audio.json
+          TOKEN=$(python -c 'import json; print(json.load(open("/tmp/audio.json"))["token"])')
+          curl -fsS -L --max-time 45 -r 0-131071 -o /tmp/audio.bin "$API/api/audio/chunked/$TOKEN"
+          echo "audio_bytes=$(wc -c < /tmp/audio.bin)"
+          test $(wc -c < /tmp/audio.bin) -gt 10000
+
+      - name: TikTok metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -L --max-time 45 -H 'Content-Type: application/json' -d "{\"url\":\"$TIKTOK_URL\"}" "$API/api/info" | tee /tmp/tiktok-info.json
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/tiktok-info.json'))
+          print('TIKTOK', {k:x.get(k) for k in ['platform','id','title','duration','choices']})
+          assert x.get('platform') == 'tiktok'
+          assert x.get('choices')
+          PY
