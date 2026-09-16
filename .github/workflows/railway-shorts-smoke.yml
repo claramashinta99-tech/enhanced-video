@@ -81,7 +81,7 @@ jobs:
           echo "audio_bytes=$(wc -c < /tmp/audio.bin)"
           test $(wc -c < /tmp/audio.bin) -gt 10000
 
-      - name: TikTok metadata
+      - name: TikTok end-to-end
         shell: bash
         run: |
           set -euo pipefail
@@ -93,3 +93,16 @@ jobs:
           assert x.get('platform') == 'tiktok'
           assert x.get('choices')
           PY
+          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$TIKTOK_URL\",\"quality\":\"best\"}" "$API/api/jobs" | tee /tmp/tiktok-job.json
+          JOB=$(python -c 'import json; print(json.load(open("/tmp/tiktok-job.json"))["job_id"])')
+          for i in $(seq 1 60); do
+            BODY=$(curl -fsS -L --max-time 20 "$API/api/jobs/$JOB")
+            STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
+            echo "$BODY"
+            [ "$STATE" = ready ] && break
+            [ "$STATE" = error ] && exit 1
+            sleep 1
+          done
+          curl -fsS -L --max-time 45 -r 0-131071 -o /tmp/tiktok.bin "$API/api/jobs/$JOB/file"
+          echo "tiktok_bytes=$(wc -c < /tmp/tiktok.bin)"
+          test $(wc -c < /tmp/tiktok.bin) -gt 10000
