@@ -73,7 +73,7 @@
 
   function applyStaticCopy(){
     const en=lang();const sub=qs('#page-sub');
-    if(sub)sub.textContent=en==='en'?`Paste a ${platform==='youtube'?'YouTube':'TikTok'} link, check it, then choose the quality.`:`Tempel link ${platform==='youtube'?'YouTube':'TikTok'}, cek videonya, lalu pilih kualitas.`;
+    if(sub)sub.textContent=en==='en'?`Paste a ${platform==='youtube'?'YouTube':'TikTok'} link, check it, then choose the video quality.`:`Tempel link ${platform==='youtube'?'YouTube':'TikTok'}, cek videonya, lalu pilih kualitas video.`;
     input.placeholder=en==='en'?`Paste ${platform==='youtube'?'YouTube':'TikTok'} link`:`Tempel link ${platform==='youtube'?'YouTube':'TikTok'}`;
     inspectBtn.textContent=en==='en'?'Check':'Cek';
     if(!downloadBtn.disabled)downloadBtn.textContent='Download';
@@ -95,7 +95,7 @@
       const data=await r.json().catch(()=>({}));if(run!==inspectRun)return;if(!r.ok)throw new Error(data.detail||text('Link nggak bisa dibaca.','Could not read this link.'));
       current={url,data};if(thumb){thumb.src=data.thumbnail||'';thumb.alt=data.title||'Media thumbnail'}if(titleEl)titleEl.textContent=data.title||'Untitled';
       const bits=[];if(data.uploader)bits.push(data.uploader);if(data.duration)bits.push(fmtDuration(data.duration));if(platform==='youtube'&&data.max_height)bits.push(`max ${data.max_height}p`);if(metaEl)metaEl.textContent=bits.join(' · ');
-      (data.choices||[]).forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.label;quality.appendChild(o)});
+      (data.choices||[]).filter(c=>c.id!=='audio').forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.label;quality.appendChild(o)});
       quality.disabled=false;downloadBtn.disabled=false;downloadBtn.textContent='Download';card.classList.add('show');hideProgress();setStatus('');
     }catch(e){if(e.name==='AbortError'||run!==inspectRun)return;console.error(e);resetMediaCard();setStatus(e.message||text('Gagal mengecek link.','Failed to check link.'),'error')}
     finally{if(run===inspectRun){inspectBtn.disabled=false;input.disabled=false;inspectController=null}}
