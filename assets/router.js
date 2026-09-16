@@ -6,7 +6,15 @@
   function setNavForPath(path){const link=document.querySelector('.nav-link');if(!link)return;if(path==='/'){link.href='#tools';link.textContent='Tools';link.dataset.i18n='tools'}else{link.href='/';link.textContent='Homepage';link.dataset.i18n='home'}}
   function replaceStaticFooter(doc){document.querySelectorAll('.footer').forEach(el=>el.parentElement?.remove());const target=doc.querySelector('.footer');if(!target)return;const holder=target.parentElement?.cloneNode(true);if(!holder)return;const credit=document.querySelector('.rvl-credit');document.body.insertBefore(holder,credit||null)}
   function replaceToast(doc){document.querySelector('#toast')?.remove();const toast=doc.querySelector('#toast');if(toast){const credit=document.querySelector('.rvl-credit');document.body.insertBefore(toast.cloneNode(true),credit||null)}}
-  function loadRouteScript(path){document.querySelectorAll('script[data-rvl-route-script]').forEach(s=>s.remove());document.querySelector('#rvl-download-frame')?.remove();let src=null,type=null;if(path==='/clarity/'){src=`/assets/clarity.js?route=${Date.now()}`;type='module'}else if(path==='/tiktok-downloader/'||path==='/youtube-downloader/'){src=`/assets/downloader.js?route=${Date.now()}`}if(!src)return;const s=document.createElement('script');s.dataset.rvlRouteScript='1';s.src=src;if(type)s.type=type;document.body.appendChild(s)}
+  function ensureHomeCss(){if(document.querySelector('link[href*="/assets/home.css"]'))return;const l=document.createElement('link');l.rel='stylesheet';l.href='/assets/home.css?v=1';l.dataset.rvlHomeCss='1';document.head.appendChild(l)}
+  function loadRouteScript(path){
+    document.querySelectorAll('script[data-rvl-route-script]').forEach(s=>s.remove());document.querySelector('#rvl-download-frame')?.remove();
+    let src=null,type=null;
+    if(path==='/'){ensureHomeCss();src=`/assets/home.js?route=${Date.now()}`}
+    else if(path==='/clarity/'){src=`/assets/clarity.js?route=${Date.now()}`;type='module'}
+    else if(path==='/tiktok-downloader/'||path==='/youtube-downloader/'){src=`/assets/downloader.js?route=${Date.now()}`}
+    if(!src)return;const s=document.createElement('script');s.dataset.rvlRouteScript='1';s.src=src;if(type)s.type=type;document.body.appendChild(s)
+  }
   async function navigate(url,{push=true}={}){
     if(navigating)return;const u=new URL(url,location.href);const path=routePath(u);
     if(!ROUTES.has(path)){location.href=u.href;return}
