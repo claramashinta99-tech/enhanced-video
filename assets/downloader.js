@@ -22,12 +22,16 @@ function lang(){return localStorage.getItem('reyval-lang')||'id'}
 function text(id,en){return lang()==='en'?en:id}
 function fmtDuration(s){if(!Number.isFinite(Number(s)))return'';s=Math.round(Number(s));const m=Math.floor(s/60),sec=s%60;return `${m}:${String(sec).padStart(2,'0')}`}
 function setStatus(msg,type=''){statusEl.textContent=msg;statusEl.className='download-status-text'+(type?' '+type:'')}
-function validForPlatform(url){
-  try{const h=new URL(url).hostname.toLowerCase();return platform==='youtube'?(/(^|\.)youtube\.com$/.test(h)||h==='youtu.be'):(/(^|\.)tiktok\.com$/.test(h));}catch{return false}
-}
-function filenameFromDisposition(value,fallback){
-  const m=value&&value.match(/filename\*=UTF-8''([^;]+)/i);if(m){try{return decodeURIComponent(m[1])}catch{}}
-  const q=value&&value.match(/filename="([^"]+)"/i);return q?q[1]:fallback;
+function validForPlatform(url){try{const h=new URL(url).hostname.toLowerCase();return platform==='youtube'?(/(^|\.)youtube\.com$/.test(h)||h==='youtu.be'):(/(^|\.)tiktok\.com$/.test(h));}catch{return false}}
+function filenameFromDisposition(value,fallback){const m=value&&value.match(/filename\*=UTF-8''([^;]+)/i);if(m){try{return decodeURIComponent(m[1])}catch{}}const q=value&&value.match(/filename="([^"]+)"/i);return q?q[1]:fallback}
+function applyStaticCopy(){
+  const en=lang()==='en';
+  const sub=qs('#page-sub');
+  if(sub)sub.textContent=en?`Paste a ${platform==='youtube'?'YouTube':'TikTok'} link, check it, then choose the quality.`:`Tempel link ${platform==='youtube'?'YouTube':'TikTok'}, cek videonya, lalu pilih kualitas.`;
+  input.placeholder=en?`Paste ${platform==='youtube'?'YouTube':'TikTok'} link`:`Tempel link ${platform==='youtube'?'YouTube':'TikTok'}`;
+  inspectBtn.textContent=en?'Check':'Cek';
+  downloadBtn.textContent='Download';
+  if(!current)setStatus(en?'Ready to use.':'Siap dipakai.');
 }
 
 async function inspect(){
@@ -39,8 +43,7 @@ async function inspect(){
     const data=await r.json().catch(()=>({}));
     if(!r.ok)throw new Error(data.detail||text('Link nggak bisa dibaca.','Could not read this link.'));
     current={url,data};
-    thumb.src=data.thumbnail||'';thumb.alt=data.title||'Media thumbnail';
-    titleEl.textContent=data.title||'Untitled';
+    thumb.src=data.thumbnail||'';thumb.alt=data.title||'Media thumbnail';titleEl.textContent=data.title||'Untitled';
     const bits=[];if(data.uploader)bits.push(data.uploader);if(data.duration)bits.push(fmtDuration(data.duration));metaEl.textContent=bits.join(' · ');
     quality.innerHTML='';(data.choices||[]).forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.label;quality.appendChild(o)});
     quality.disabled=false;downloadBtn.disabled=false;card.classList.add('show');setStatus(text('Siap. Pilih kualitas lalu download.','Ready. Choose a quality and download.'),'ok');
@@ -59,4 +62,5 @@ async function download(){
 }
 
 inspectBtn.addEventListener('click',inspect);downloadBtn.addEventListener('click',download);input.addEventListener('keydown',e=>{if(e.key==='Enter')inspect()});
-window.addEventListener('reyval:lang',()=>{if(current)setStatus(text('Siap. Pilih kualitas lalu download.','Ready. Choose a quality and download.'),'ok')});
+window.addEventListener('reyval:lang',()=>{applyStaticCopy();if(current)setStatus(text('Siap. Pilih kualitas lalu download.','Ready. Choose a quality and download.'),'ok')});
+applyStaticCopy();
