@@ -13,12 +13,21 @@ jobs:
       API: https://enhanced-video-production.up.railway.app
       SHORT_URL: https://www.youtube.com/shorts/Xh7I5J8eDQY
     steps:
-      - name: Health
+      - name: Diagnose public endpoint
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS --max-time 30 "$API/health" | tee /tmp/health.json
-          echo
+          for path in / /health; do
+            echo "=== $path ==="
+            code=$(curl -sS -L --max-time 30 -D /tmp/headers -o /tmp/body -w '%{http_code}' "$API$path" || true)
+            echo "http=$code bytes=$(wc -c < /tmp/body 2>/dev/null || echo 0)"
+            cat /tmp/headers || true
+            echo '--- body ---'
+            head -c 3000 /tmp/body || true
+            echo
+          done
+          code=$(curl -sS -L --max-time 30 -o /tmp/health.json -w '%{http_code}' "$API/health")
+          test "$code" = 200
           python - <<'PY'
           import json
           x=json.load(open('/tmp/health.json'))
@@ -31,7 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           START=$(date +%s)
-          curl -fsS --max-time 45 -H 'Content-Type: application/json' \
+          curl -fsS -L --max-time 45 -H 'Content-Type: application/json' \
             -d "{\"url\":\"$SHORT_URL\"}" "$API/api/info" | tee /tmp/info.json
           echo
           echo "info_seconds=$(($(date +%s)-START))"
@@ -47,7 +56,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS --max-time 30 -H 'Content-Type: application/json' \
+          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' \
             -d "{\"url\":\"$SHORT_URL\",\"quality\":\"best\"}" "$API/api/jobs" | tee /tmp/job.json
           echo
           python - <<'PY' >> "$GITHUB_ENV"
@@ -62,7 +71,7 @@ jobs:
           set -euo pipefail
           START=$(date +%s)
           for i in $(seq 1 60); do
-            BODY=$(curl -fsS --max-time 20 "$API/api/jobs/$JOB_ID")
+            BODY=$(curl -fsS -L --max-time 20 "$API/api/jobs/$JOB_ID")
             echo "$BODY"
             STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
             if [ "$STATE" = ready ]; then
