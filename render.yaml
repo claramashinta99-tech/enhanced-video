@@ -3,6 +3,7 @@ services:
     name: rvl-api
     runtime: docker
     plan: free
+    region: singapore
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     healthCheckPath: /health
