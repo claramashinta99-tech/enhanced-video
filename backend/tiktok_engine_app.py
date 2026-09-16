@@ -17,8 +17,12 @@ legacy = engine.legacy
 
 _ORIGINAL_EXTRACT_INFO = legacy.extract_info_sync
 _ORIGINAL_DOWNLOAD_SYNC = legacy.download_sync
+_ORIGINAL_QUALITY_CHOICES = legacy.quality_choices
 _TIKTOK_STRATEGY = {'name': 'tiktok-fresh', 'clients': None, 'cookie': False}
 _TIKWM_STRATEGY = {'name': 'tikwm-fallback', 'clients': None, 'cookie': False}
+# The base API already whitelists 2160. TikTok exposes this slot in the UI as
+# "HD" so we can add the mode without changing the shared YouTube API contract.
+_TIKTOK_HD_SLOT = '2160'
 _TIKWM_API = 'https://www.tikwm.com/api/'
 _TIKWM_SUBMIT = 'https://tikwm.com/api/video/task/submit'
 _TIKWM_RESULT = 'https://tikwm.com/api/video/task/result?task_id='
@@ -63,11 +67,13 @@ def _best_thumbnail(info):
     thumbs = [x for x in (info.get('thumbnails') or []) if isinstance(x, dict) and x.get('url')]
     if not thumbs:
         return None
+
     def score(item):
         try:
             return int(item.get('width') or 0) * int(item.get('height') or 0)
         except Exception:
             return 0
+
     return max(thumbs, key=score).get('url')
 
 
@@ -106,22 +112,27 @@ def _parse_tikwm_payload(payload, url):
     detail = data.get('detail') if isinstance(data.get('detail'), dict) else data
     if not isinstance(detail, dict):
         return None
-    play = detail.get('hdplay') or detail.get('play') or detail.get('wmplay') or detail.get('play_url') or detail.get('url')
+
+    hd_url = detail.get('hdplay') or detail.get('hd_play') or detail.get('hdplay_url')
+    play_url = detail.get('play') or detail.get('play_url') or detail.get('url') or detail.get('wmplay')
     images = detail.get('images') or data.get('images') or []
-    if not play and not images:
+    if not hd_url and not play_url and not images:
         return None
+
     author = detail.get('author') or data.get('author') or {}
     music = detail.get('music_info') or data.get('music_info') or {}
     vid = detail.get('id') or detail.get('video_id') or data.get('video_id') or _video_id(url) or ''
     if isinstance(vid, (int, float)):
         vid = str(int(vid))
+
     return {
         'id': str(vid),
         'title': detail.get('title') or detail.get('desc') or data.get('title') or 'TikTok video',
         'thumbnail': detail.get('origin_cover') or detail.get('cover') or detail.get('ai_dynamic_cover') or data.get('cover') or None,
         'duration': detail.get('duration') or data.get('duration'),
         'uploader': author.get('unique_id') or author.get('uniqueId') or author.get('nickname') or _username(url),
-        'play_url': play,
+        'hd_url': hd_url,
+        'play_url': play_url or hd_url,
         'music_url': music.get('play') if isinstance(music, dict) else None,
         'images': images if isinstance(images, list) else [],
     }
@@ -138,7 +149,8 @@ def _json_request(url, data=None, timeout=10):
 
 def _tikwm_quick(url):
     last_error = None
-    # Keep the quick path short; the task API below is the stronger fallback.
+    # Ask for the higher-bitrate rendition explicitly. This remains a direct
+    # download; there is no upscale/re-encode step.
     for candidate in _tikwm_candidates(url)[:3]:
         try:
             endpoint = _TIKWM_API + '?' + urllib.parse.urlencode({'url': candidate, 'hd': '1'})
@@ -194,6 +206,8 @@ def _tikwm_as_info(url, item):
     formats = []
     if item.get('play_url'):
         formats.append({'format_id': 'tikwm-best', 'url': item['play_url'], 'ext': 'mp4', 'vcodec': 'h264', 'acodec': 'aac', 'protocol': 'https'})
+    if item.get('hd_url') and item.get('hd_url') != item.get('play_url'):
+        formats.append({'format_id': 'tikwm-hd', 'url': item['hd_url'], 'ext': 'mp4', 'vcodec': 'h264', 'acodec': 'aac', 'protocol': 'https'})
     if item.get('music_url'):
         formats.append({'format_id': 'tikwm-audio', 'url': item['music_url'], 'ext': 'mp3', 'vcodec': 'none', 'acodec': 'mp3', 'protocol': 'https'})
     return {
@@ -236,6 +250,18 @@ def extract_info_sync(url):
         print(f'tiktok info fallback ok id={info.get("id")}', flush=True)
         return info
     raise DownloadError('TikTok media info failed')
+
+
+def quality_choices(info, platform):
+    if platform != 'tiktok':
+        return _ORIGINAL_QUALITY_CHOICES(info, platform)
+    # "Normal" keeps the native TikTok path. "HD" intentionally uses an
+    # existing whitelisted quality id internally; download_sync maps that id
+    # to TikTok's higher-bitrate source instead of pretending it is 2160p.
+    return [
+        {'id': 'best', 'label': 'Normal'},
+        {'id': _TIKTOK_HD_SLOT, 'label': 'HD · Highest bitrate'},
+    ]
 
 
 def _tiktok_format(quality):
@@ -293,20 +319,50 @@ def _download_tikwm(url, quality, workdir, job_id=None):
         subprocess.run(['ffmpeg', '-y', '-i', str(source), '-vn', '-codec:a', 'libmp3lame', '-b:a', '192k', str(target)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
         return target
 
-    media_url = item.get('play_url')
+    is_hd = quality == _TIKTOK_HD_SLOT
+    media_url = (item.get('hd_url') or item.get('play_url')) if is_hd else (item.get('play_url') or item.get('hd_url'))
     if not media_url:
         raise DownloadError('TikWM video URL unavailable')
-    target = Path(workdir) / f'{title} [{vid}].mp4'
-    return _stream_url_to_file(media_url, target, job_id, 'Mengambil media')
+    suffix = '_hd' if is_hd else ''
+    target = Path(workdir) / f'{title} [{vid}]{suffix}.mp4'
+    stage = 'Mengambil stream HD' if is_hd else 'Mengambil media'
+    return _stream_url_to_file(media_url, target, job_id, stage)
+
+
+def _rename_hd(path):
+    if not path or path.suffix.lower() == '.mp3' or path.stem.endswith('_hd'):
+        return path
+    target = path.with_name(f'{path.stem}_hd{path.suffix}')
+    if target != path:
+        path.rename(target)
+    return target
 
 
 def download_sync(url, quality, workdir, job_id=None):
     if not _is_tiktok(url):
         return _ORIGINAL_DOWNLOAD_SYNC(url, quality, workdir, job_id)
 
+    requested_quality = quality
     if job_id:
         legacy.job_update(job_id, state='working', progress=8, stage='Menyiapkan')
     legacy.clear_workdir(workdir)
+
+    # HD path: request the high-bitrate rendition first and stream it as-is.
+    # No FFmpeg transcode/upscale is performed here.
+    if requested_quality == _TIKTOK_HD_SLOT:
+        if job_id:
+            legacy.job_update(job_id, state='working', progress=10, stage='Mencari stream HD')
+        try:
+            path = _download_tikwm(url, requested_quality, workdir, job_id)
+            print(f'tiktok hd direct ok id={_video_id(url)} bytes={path.stat().st_size}', flush=True)
+            return path
+        except Exception as exc:
+            print(f'tiktok hd direct failed type={type(exc).__name__} detail={str(exc)[-300:]}', flush=True)
+            # Fall back to the best native TikTok rendition instead of failing.
+            quality = 'best'
+            legacy.clear_workdir(workdir)
+            if job_id:
+                legacy.job_update(job_id, state='working', progress=12, stage='Mencoba kualitas terbaik TikTok')
 
     opts = legacy.base_opts(url, None, False)
     opts.update({'format': _tiktok_format(quality), 'outtmpl': str(Path(workdir) / '%(title).80B [%(id)s].%(ext)s'), 'windowsfilenames': True, 'noplaylist': True, 'retries': 1, 'fragment_retries': 1, 'extractor_retries': 1, 'socket_timeout': 12})
@@ -321,6 +377,8 @@ def download_sync(url, quality, workdir, job_id=None):
         with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
         path = legacy.find_output(workdir)
+        if requested_quality == _TIKTOK_HD_SLOT:
+            path = _rename_hd(path)
         if info:
             fresh = copy.deepcopy(info)
             fresh['thumbnail'] = _tiktok_oembed_thumbnail(url) or _best_thumbnail(fresh)
@@ -331,12 +389,13 @@ def download_sync(url, quality, workdir, job_id=None):
 
     if job_id:
         legacy.job_update(job_id, state='working', progress=12, stage='Mencoba jalur cadangan')
-    path = _download_tikwm(url, quality, workdir, job_id)
+    path = _download_tikwm(url, requested_quality, workdir, job_id)
     print(f'tiktok download fallback ok id={_video_id(url)}', flush=True)
     return path
 
 
 legacy.extract_info_sync = extract_info_sync
 legacy.download_sync = download_sync
-legacy.APP_VERSION = '1.15.9'
+legacy.quality_choices = quality_choices
+legacy.APP_VERSION = '1.16.0'
 app.version = legacy.APP_VERSION
