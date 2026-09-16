@@ -10,7 +10,7 @@
   <script defer src="../assets/common.js?v=20260916"></script>
   <script defer src="../assets/ambient.js?v=1"></script>
   <script defer src="../assets/router.js?v=3"></script>
-  <script defer src="../assets/mp3.js?v=1"></script>
+  <script defer src="../assets/mp3.js?v=2"></script>
 </head>
 <body data-platform="youtube-mp3">
   <div class="shell">
@@ -19,9 +19,9 @@
     <main class="downloader-page">
       <div class="downloader-wrap">
         <div class="downloader-head">
-          <span class="eyebrow"><i class="eyebrow-dot"></i>YOUTUBE MP3</span>
+          <span class="eyebrow"><i class="eyebrow-dot"></i>YOUTUBE AUDIO</span>
           <h1>YouTube MP3 Downloader</h1>
-          <p id="page-sub">Tempel link YouTube, lalu convert audionya ke MP3.</p>
+          <p id="page-sub">Tempel link YouTube, lalu pilih audio cepat atau MP3.</p>
         </div>
 
         <div class="download-card">
@@ -37,8 +37,11 @@
               <div id="media-title" class="media-title">—</div>
               <div id="media-meta" class="media-meta"></div>
               <div class="media-actions">
-                <div class="mp3-format">MP3 · 192 kbps</div>
-                <button id="download-btn" class="btn primary" type="button" disabled>Download MP3</button>
+                <select id="audio-mode" class="audio-mode" aria-label="Format audio">
+                  <option value="fast" selected>Audio cepat · tanpa convert</option>
+                  <option value="mp3">MP3 · 192 kbps</option>
+                </select>
+                <button id="download-btn" class="btn primary" type="button" disabled>Download Audio</button>
               </div>
             </div>
           </div>
