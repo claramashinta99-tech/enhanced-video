@@ -2,37 +2,25 @@ name: RVL downloader benchmark
 
 on:
   push:
-    branches: [main]
-    paths:
-      - '.github/workflows/rvl-benchmark.yml'
-      - 'backend/**'
-      - 'assets/mp3.js'
+    branches: [benchmark-rvl]
   workflow_dispatch:
 
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 10
     env:
       VIDEO_URL: 'https://www.youtube.com/watch?v=9_0Dk2B2zmA'
       API: 'https://rvl-api.onrender.com'
     steps:
-      - name: Wait for RVL backend v1.13.1
+      - name: Confirm live backend
         shell: bash
         run: |
           set -euo pipefail
-          for i in $(seq 1 50); do
-            BODY=$(curl -fsS --max-time 20 "$API/health" || true)
-            echo "health[$i]=$BODY"
-            if echo "$BODY" | grep -q '"version":"1.13.1"'; then
-              exit 0
-            fi
-            sleep 10
-          done
-          echo 'Backend did not reach v1.13.1 in time' >&2
-          exit 1
+          curl -fsS --max-time 20 "$API/health" | tee /tmp/health.json
+          grep -q '"version":"1.13.1"' /tmp/health.json
 
-      - name: Benchmark RVL check prepare proxy and direct CDN
+      - name: Prepare one audio token with retries
         shell: bash
         run: |
           set -euo pipefail
@@ -41,54 +29,79 @@ jobs:
           print(json.dumps({'url': os.environ['VIDEO_URL']}))
           PY
           )
-
-          echo '--- /api/mp3/info ---'
+          echo '--- info ---'
           curl -sS --max-time 45 -o /tmp/info.json \
-            -w 'http=%{http_code} connect=%{time_connect}s ttfb=%{time_starttransfer}s total=%{time_total}s\n' \
+            -w 'info http=%{http_code} ttfb=%{time_starttransfer}s total=%{time_total}s\n' \
             -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/mp3/info"
           cat /tmp/info.json; echo
 
-          echo '--- /api/audio/prepare ---'
-          curl -sS --max-time 45 -o /tmp/prepare.json \
-            -w 'http=%{http_code} connect=%{time_connect}s ttfb=%{time_starttransfer}s total=%{time_total}s\n' \
-            -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/audio/prepare"
-          cat /tmp/prepare.json; echo
-          TOKEN=$(python - <<'PY'
+          : > /tmp/prepare.json
+          for i in 1 2 3; do
+            echo "--- prepare attempt $i ---"
+            CODE=$(curl -sS --max-time 35 -o /tmp/prepare.json \
+              -w '%{http_code}' -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/audio/prepare" || true)
+            echo "http=$CODE body=$(cat /tmp/prepare.json)"
+            TOKEN=$(python - <<'PY'
           import json
-          print(json.load(open('/tmp/prepare.json')).get('token',''))
+          try: print(json.load(open('/tmp/prepare.json')).get('token',''))
+          except: print('')
           PY
-          )
-          test -n "$TOKEN"
+            )
+            if [ -n "$TOKEN" ]; then echo "$TOKEN" > /tmp/token; exit 0; fi
+            sleep 4
+            curl -sS --max-time 45 -o /dev/null -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/mp3/info" || true
+          done
+          echo 'prepare never returned token' >&2
+          exit 1
 
-          echo '--- diagnostic source metadata ---'
+      - name: Inspect token and compare direct CDN vs Render proxy
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -u
+          TOKEN=$(cat /tmp/token)
+          echo '--- source debug ---'
           curl -sS --max-time 20 "$API/api/audio/debug/$TOKEN"; echo
 
-          echo '--- direct CDN redirect: Render only resolves URL, client downloads from GoogleVideo ---'
-          set +e
+          echo '--- DIRECT CDN (cross-IP test) ---'
           curl -sS -L --max-time 90 -o /dev/null \
             -w 'direct http=%{http_code} redirects=%{num_redirects} ttfb=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} speed_Bps=%{speed_download}\n' \
             "$API/api/audio/direct/$TOKEN"
-          DIRECT_RC=$?
-          echo "direct_exit=$DIRECT_RC"
-          set -e
+          echo "direct_exit=$?"
 
-          echo '--- first 1 MiB through current Render proxy ---'
+          echo '--- Render proxy first 1 MiB ---'
           curl -sS -L --max-time 90 -H 'Range: bytes=0-1048575' -o /dev/null \
             -w 'proxy1m http=%{http_code} ttfb=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} speed_Bps=%{speed_download}\n' \
             "$API/api/audio/chunked/$TOKEN"
+          echo "proxy1m_exit=$?"
 
-          echo '--- full audio through current Render proxy (max 180s) ---'
-          set +e
-          curl -sS -L --max-time 180 -o /dev/null \
+          echo '--- Render proxy full file ---'
+          curl -sS -L --max-time 90 -o /dev/null \
             -w 'proxyfull http=%{http_code} ttfb=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} speed_Bps=%{speed_download}\n' \
             "$API/api/audio/chunked/$TOKEN"
           echo "proxyfull_exit=$?"
-          set -e
 
-      - name: Benchmark RVL MP3 job up to 180 seconds
+      - name: Compare direct yt-dlp on fresh machine
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
+          python -m pip install -q -U 'yt-dlp[default,curl-cffi]'
+          yt-dlp --version
+          echo '--- yt-dlp metadata ---'
+          /usr/bin/time -f 'metadata elapsed=%e sec' timeout 90 yt-dlp --no-warnings --skip-download --print '%(title)s | %(duration)s sec' "$VIDEO_URL"
+          echo "metadata_exit=$?"
+          echo '--- yt-dlp native audio download, 4 MiB chunks ---'
+          rm -f /tmp/rvl-direct.*
+          /usr/bin/time -f 'direct-download elapsed=%e sec' timeout 180 yt-dlp --no-warnings --http-chunk-size 4M -f 'bestaudio[ext=m4a]/bestaudio' -o '/tmp/rvl-direct.%(ext)s' "$VIDEO_URL"
+          echo "ytdlp_download_exit=$?"
+          ls -lh /tmp/rvl-direct.* 2>/dev/null || true
+
+      - name: Benchmark MP3 conversion for at most 120 seconds
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -u
           PAYLOAD=$(python - <<'PY'
           import json, os
           print(json.dumps({'url': os.environ['VIDEO_URL'], 'quality':'audio'}))
@@ -99,37 +112,20 @@ jobs:
           cat /tmp/job.json; echo
           JOB=$(python - <<'PY'
           import json
-          print(json.load(open('/tmp/job.json')).get('job_id',''))
+          try: print(json.load(open('/tmp/job.json')).get('job_id',''))
+          except: print('')
           PY
           )
-          test -n "$JOB"
-          for i in $(seq 1 90); do
-            BODY=$(curl -sS --max-time 20 "$API/api/jobs/$JOB")
+          test -n "$JOB" || exit 0
+          for i in $(seq 1 60); do
+            BODY=$(curl -sS --max-time 20 "$API/api/jobs/$JOB" || true)
             NOW=$(date +%s)
             echo "t=$((NOW-START))s $BODY"
-            STATE=$(python -c 'import sys,json; print(json.load(sys.stdin).get("state",""))' <<<"$BODY")
-            if [ "$STATE" = ready ]; then
-              echo '--- final MP3 file transfer ---'
-              curl -sS -L --max-time 120 -o /dev/null \
-                -w 'mp3file http=%{http_code} ttfb=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} speed_Bps=%{speed_download}\n' \
-                "$API/api/jobs/$JOB/file"
-              exit 0
-            fi
-            if [ "$STATE" = error ]; then echo 'MP3 job error'; exit 0; fi
+            STATE=$(python -c 'import sys,json; x=sys.stdin.read();
+          try: print(json.loads(x).get("state",""))
+          except: print("")' <<<"$BODY")
+            [ "$STATE" = ready ] && exit 0
+            [ "$STATE" = error ] && exit 0
             sleep 2
           done
-          echo 'MP3 job exceeded 180 seconds'
-
-      - name: Compare direct yt-dlp from GitHub runner
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m pip install -q -U 'yt-dlp[default,curl-cffi]'
-          yt-dlp --version
-          echo '--- metadata ---'
-          /usr/bin/time -f 'metadata elapsed=%e sec' timeout 90 yt-dlp --no-warnings --skip-download --print '%(title)s | %(duration)s sec' "$VIDEO_URL"
-          echo '--- direct audio using yt-dlp native downloader with 4 MiB chunks ---'
-          rm -f /tmp/rvl-direct.*
-          /usr/bin/time -f 'direct-download elapsed=%e sec' timeout 180 yt-dlp --no-warnings --http-chunk-size 4M -f 'bestaudio[ext=m4a]/bestaudio' -o '/tmp/rvl-direct.%(ext)s' "$VIDEO_URL"
-          ls -lh /tmp/rvl-direct.*
+          echo 'MP3 still not ready after ~120 sec'
