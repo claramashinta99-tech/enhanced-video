@@ -1,5 +1,5 @@
 (()=>{
-  const RVL_API='https://rvl-api.onrender.com';
+  const RVL_API='https://enhanced-video-production.up.railway.app';
   const MEDIABUNNY_URL='https://esm.sh/mediabunny@1.56.3';
   const MP3_ENCODER_URL='https://esm.sh/@mediabunny/mp3-encoder@1.56.3';
   const qs=s=>document.querySelector(s);
@@ -79,18 +79,18 @@
   function updateModeCopy(){
     if(!current)return;
     const bits=[];if(current.data.uploader)bits.push(current.data.uploader);
-    bits.push(selectedFast()?text('Audio cepat · tanpa convert','Fast audio · no conversion'):text('MP3 · 192 kbps · proses lokal','MP3 · 192 kbps · local processing'));
+    bits.push(selectedFast()?text('Audio Asli','Original Audio'):'MP3 · 192 kbps');
     if(metaEl)metaEl.textContent=bits.join(' · ');
     downloadBtn.textContent=selectedFast()?text('Download Audio','Download Audio'):'Download MP3';
   }
 
   function applyStaticCopy(){
     const en=lang()==='en';const sub=qs('#page-sub');
-    if(sub)sub.textContent=en?'Paste a YouTube link, then choose fast audio or MP3. MP3 is converted on your device.':'Tempel link YouTube, lalu pilih audio cepat atau MP3. MP3 diproses langsung di perangkat lu.';
+    if(sub)sub.textContent=en?'Paste a YouTube link, check the audio, then choose Original Audio or MP3 192 kbps.':'Tempel link YouTube, cek audionya, lalu pilih Audio Asli atau MP3 192 kbps.';
     input.placeholder=en?'Paste YouTube link':'Tempel link YouTube';inspectBtn.textContent=en?'Check':'Cek';
     const fastOpt=mode.querySelector('option[value="fast"]');const mp3Opt=mode.querySelector('option[value="mp3"]');
-    if(fastOpt)fastOpt.textContent=en?'Fast audio · no conversion':'Audio cepat · tanpa convert';
-    if(mp3Opt)mp3Opt.textContent=en?'MP3 · 192 kbps · local':'MP3 · 192 kbps · lokal';
+    if(fastOpt)fastOpt.textContent=en?'Original Audio':'Audio Asli';
+    if(mp3Opt)mp3Opt.textContent='MP3 · 192 kbps';
     if(!downloadBtn.disabled)updateModeCopy();
   }
 
@@ -154,14 +154,14 @@
         setProgress(100,text('Selesai','Done'));frame.src=`${RVL_API}/api/jobs/${encodeURIComponent(jobId)}/file?_=${Date.now()}`;
         downloadBtn.disabled=false;updateModeCopy();setTimeout(()=>{if(run===downloadRun)hideProgress()},2200);return;
       }
-      if(data.state==='error')throw new Error(data.error||text('Convert MP3 gagal.','MP3 conversion failed.'));
+      if(data.state==='error')throw new Error(data.error||text('Proses MP3 gagal.','MP3 process failed.'));
     }
   }
 
   async function downloadMp3ServerFallback(run){
-    setProgress(3,text('Mode kompatibilitas server','Server compatibility mode'));
+    setProgress(3,text('Mencoba jalur cadangan','Trying fallback path'));
     const r=await fetch(`${RVL_API}/api/mp3/jobs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url,quality:'audio'}),cache:'no-store'});
-    const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok||!data.job_id)throw new Error(data.detail||text('Gagal memulai MP3.','Could not start MP3 conversion.'));
+    const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok||!data.job_id)throw new Error(data.detail||text('Gagal memulai MP3.','Could not start MP3 processing.'));
     await pollJob(data.job_id,run);
   }
 
@@ -201,20 +201,20 @@
     const [prepared,mb]=await Promise.all([warmPrepare(current.url),loadMp3Engine()]);
     if(run!==downloadRun)return;
     const sourceBlob=await fetchAudioBlob(prepared.token,run);if(run!==downloadRun)return;
-    setProgress(48,text('Convert MP3 di perangkat','Converting MP3 on device'));
+    setProgress(48,text('Menyiapkan MP3','Preparing MP3'));
     const file=new File([sourceBlob],prepared.filename||'source.m4a',{type:sourceBlob.type||'audio/mp4'});
     const mbInput=new mb.Input({source:new mb.BlobSource(file),formats:mb.ALL_FORMATS});
     const target=new mb.BufferTarget();
     const output=new mb.Output({format:new mb.Mp3OutputFormat(),target});
     const conversion=await mb.Conversion.init({input:mbInput,output,audio:{bitrate:192000}});
-    if(!conversion.isValid)throw new Error(text('Browser ini nggak bisa convert audio tersebut.','This browser cannot convert this audio.'));
+    if(!conversion.isValid)throw new Error(text('Browser ini nggak bisa menyiapkan MP3 tersebut.','This browser cannot prepare this MP3.'));
     activeConversion=conversion;
-    conversion.onProgress=(p)=>{if(run===downloadRun)setProgress(48+Math.max(0,Math.min(1,p))*49,text('Convert MP3 di perangkat','Converting MP3 on device'))};
+    conversion.onProgress=(p)=>{if(run===downloadRun)setProgress(48+Math.max(0,Math.min(1,p))*49,text('Menyiapkan MP3','Preparing MP3'))};
     try{await conversion.execute()}finally{if(activeConversion===conversion)activeConversion=null}
     if(run!==downloadRun)throw abortError();
     if(!target.buffer)throw new Error(text('Hasil MP3 kosong.','MP3 output is empty.'));
     const result=new Blob([target.buffer],{type:'audio/mpeg'});
-    setProgress(100,text('Selesai','Done'));saveMp3(result);setStatus(text('MP3 selesai · diproses di perangkat lu.','MP3 ready · processed on your device.'));
+    setProgress(100,text('Selesai','Done'));saveMp3(result);setStatus(text('MP3 selesai.','MP3 ready.'));
     downloadBtn.disabled=false;updateModeCopy();setTimeout(()=>{if(run===downloadRun)hideProgress()},1800);
   }
 
@@ -222,8 +222,8 @@
     try{await downloadMp3Local(run)}
     catch(e){
       if(run!==downloadRun||e?.name==='AbortError')return;
-      console.warn('Local MP3 path failed, using server fallback.',e);
-      setStatus(text('Mode lokal gagal, lanjut lewat server.','Local mode failed, continuing on server.'));
+      console.warn('Primary MP3 path failed, using fallback.',e);
+      setStatus(text('Jalur utama gagal, mencoba jalur cadangan.','Primary path failed, trying the fallback path.'));
       await downloadMp3ServerFallback(run);
     }
   }
