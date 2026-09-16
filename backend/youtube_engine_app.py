@@ -20,7 +20,7 @@ legacy = base.legacy
 
 _ORIGINAL_BASE_OPTS = legacy.base_opts
 _ANSI = re.compile(r'\x1b\[[0-9;]*m')
-_SELFTEST_URL = 'https://www.youtube.com/watch?v=sJtC8WP9nSI'
+_SELFTEST_URL = 'https://www.youtube.com/watch?v=Xh7I5J8eDQY'
 _KNOWN_URL = _SELFTEST_URL
 
 
@@ -51,10 +51,10 @@ def youtube_attempts():
 
 
 SELFTEST_STRATEGIES = [
+    {'name': 'visionos-googleapis-skip', 'clients': ['visionos'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs'], 'innertube_host': 'youtubei.googleapis.com'},
+    {'name': 'android-googleapis-skip', 'clients': ['android'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs'], 'innertube_host': 'youtubei.googleapis.com'},
+    {'name': 'ios-googleapis-skip', 'clients': ['ios'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs'], 'innertube_host': 'youtubei.googleapis.com'},
     {'name': 'visionos-noplugin-skip', 'clients': ['visionos'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs']},
-    {'name': 'visionos-noplugin', 'clients': ['visionos'], 'cookie': False, 'disable_plugins': True},
-    {'name': 'default-noplugin-skip', 'clients': ['default'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs']},
-    {'name': 'android-vr-noplugin-skip', 'clients': ['android_vr'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs']},
     {'name': 'mweb-pot-skip', 'clients': ['mweb'], 'cookie': False, 'player_skip': ['webpage', 'configs']},
 ]
 
@@ -115,6 +115,8 @@ def _cli_extract(strategy, url=_SELFTEST_URL, hard_timeout=24):
     youtube_args = [f'player_client={clients}']
     if strategy.get('player_skip'):
         youtube_args.append('player_skip=' + ','.join(strategy['player_skip']))
+    if strategy.get('innertube_host'):
+        youtube_args.append('innertube_host=' + strategy['innertube_host'])
     cmd = [
         sys.executable, '-m', 'yt_dlp',
         '--dump-single-json', '--skip-download', '--no-playlist',
@@ -225,6 +227,7 @@ def _network_selftest():
         'yt_dlp_startup_no_plugins': _startup_test(True),
         'youtube_watch': _timed_http(_KNOWN_URL),
         'youtube_oembed': _timed_http(f'https://www.youtube.com/oembed?url={encoded}&format=json'),
+        'googleapis_root': _timed_http('https://youtubei.googleapis.com/', timeout=7),
         'pot_provider': legacy.pot_provider_status(),
     }
 
@@ -232,7 +235,7 @@ def _network_selftest():
 legacy.base_opts = base_opts
 legacy.youtube_attempts = youtube_attempts
 legacy.extract_info_sync = extract_info_sync
-legacy.APP_VERSION = '1.15.4'
+legacy.APP_VERSION = '1.15.5'
 app.version = legacy.APP_VERSION
 
 
