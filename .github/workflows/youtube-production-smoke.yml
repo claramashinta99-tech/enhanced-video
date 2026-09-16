@@ -1,0 +1,65 @@
+name: RVL production Shorts smoke
+
+on:
+  push:
+    branches: [youtube-engine-nightly-v1]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      API: https://rvl-api.onrender.com
+      SHORT: https://www.youtube.com/shorts/hLKiVtoD83k
+    steps:
+      - name: Wait for backend v1.15.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 36); do
+            BODY=$(curl -fsS --max-time 25 "$API/health" || true)
+            echo "$BODY"
+            if echo "$BODY" | grep -q '"version":"1.15.0"'; then exit 0; fi
+            sleep 10
+          done
+          echo 'backend did not reach v1.15.0 in time' >&2
+          exit 1
+
+      - name: Read Shorts metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAYLOAD=$(python -c 'import json,os; print(json.dumps({"url":os.environ["SHORT"]}))')
+          curl -fsS --max-time 60 -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/info" -o /tmp/info.json
+          cat /tmp/info.json
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/info.json'))
+          assert x.get('title')
+          assert x.get('choices')
+          print('TITLE', x.get('title'))
+          print('MAX_HEIGHT', x.get('max_height'))
+          PY
+
+      - name: Download Short best quality
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAYLOAD=$(python -c 'import json,os; print(json.dumps({"url":os.environ["SHORT"],"quality":"best"}))')
+          curl -fsS --max-time 60 -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/jobs" -o /tmp/job.json
+          cat /tmp/job.json
+          JOB=$(python -c 'import json; print(json.load(open("/tmp/job.json"))["job_id"])')
+          for i in $(seq 1 90); do
+            curl -fsS --max-time 25 "$API/api/jobs/$JOB" -o /tmp/state.json
+            cat /tmp/state.json; echo
+            STATE=$(python -c 'import json; print(json.load(open("/tmp/state.json"))["state"])')
+            [ "$STATE" = ready ] && break
+            [ "$STATE" = error ] && exit 1
+            sleep 2
+          done
+          test "$(python -c 'import json; print(json.load(open("/tmp/state.json"))["state"])')" = ready
+          curl -fsS -L --max-time 120 -o /tmp/short.mp4 "$API/api/jobs/$JOB/file"
+          BYTES=$(stat -c%s /tmp/short.mp4)
+          echo "downloaded_bytes=$BYTES"
+          test "$BYTES" -gt 100000
