@@ -12,50 +12,37 @@ jobs:
     env:
       API: https://rvl-api.onrender.com
     steps:
-      - name: Wait for backend v1.15.2
-        shell: bash
+      - name: Verify backend v1.15.2
         run: |
-          set -euo pipefail
-          for i in $(seq 1 36); do
-            BODY=$(curl -fsS --max-time 25 "$API/health" || true)
-            echo "$BODY"
-            if echo "$BODY" | grep -q '"version":"1.15.2"'; then exit 0; fi
-            sleep 10
-          done
-          echo 'backend did not reach v1.15.2 in time' >&2
-          exit 1
+          curl -fsS --max-time 25 "$API/health" | tee /tmp/health.json
+          grep -q '"version":"1.15.2"' /tmp/health.json
 
-      - name: Probe all YouTube strategies on Render
+      - name: Probe YouTube strategies sequentially
         shell: bash
         run: |
           set -euo pipefail
           curl -fsS --max-time 25 "$API/api/youtube/engine"; echo
           names=(mweb-pot-public default-public embedded-public android-vr-public default-embedded-cookie safari-cookie)
-          pids=()
-          for name in "${names[@]}"; do
-            (
-              curl -sS --max-time 20 "$API/api/youtube/selftest/$name" > "/tmp/$name.json" || true
-            ) &
-            pids+=("$!")
-          done
-          for pid in "${pids[@]}"; do wait "$pid" || true; done
+          : > /tmp/results.txt
           for name in "${names[@]}"; do
             echo "=== $name ==="
-            cat "/tmp/$name.json" || true
+            curl -sS --max-time 20 "$API/api/youtube/selftest/$name" | tee "/tmp/$name.json"
             echo
+            cat "/tmp/$name.json" >> /tmp/results.txt
+            echo >> /tmp/results.txt
+            sleep 1
           done
           python - <<'PY'
           import json, pathlib
           rows=[]
-          for p in pathlib.Path('/tmp').glob('*.json'):
-              try:
-                  x=json.loads(p.read_text())
-              except Exception:
-                  continue
-              if 'strategy' in x:
-                  rows.append(x)
+          for name in ['mweb-pot-public','default-public','embedded-public','android-vr-public','default-embedded-cookie','safari-cookie']:
+              p=pathlib.Path('/tmp')/f'{name}.json'
+              try: x=json.loads(p.read_text())
+              except Exception: continue
+              rows.append(x)
           ok=[x for x in rows if x.get('ok')]
+          print('RESULTS', [(x.get('strategy'), x.get('ok'), x.get('seconds'), x.get('error')) for x in rows])
           print('SUCCESSFUL', [(x.get('strategy'), x.get('seconds'), x.get('formats'), x.get('max_height')) for x in ok])
           if not ok:
-              raise SystemExit('No YouTube strategy succeeded from Render')
+              raise SystemExit('No YouTube strategy succeeded sequentially from Render')
           PY
