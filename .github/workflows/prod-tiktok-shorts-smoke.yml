@@ -6,27 +6,31 @@ on:
   workflow_dispatch:
 
 jobs:
-  smoke:
+  tiktok:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     env:
-      RAILWAY: https://enhanced-video-production.up.railway.app
       RENDER: https://rvl-api.onrender.com
       TIKTOK_URL: https://www.tiktok.com/@bukanpidel1/video/7669610923919363349
-      SHORT_URL: https://www.youtube.com/shorts/Xh7I5J8eDQY
     steps:
-      - name: Health
+      - name: Wait for Render v1.15.9
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS -L --max-time 30 "$RAILWAY/health" | tee /tmp/railway-health.json
-          curl -fsS -L --max-time 90 "$RENDER/health" | tee /tmp/render-health.json
+          for i in $(seq 1 60); do
+            BODY=$(curl -fsS -L --max-time 30 "$RENDER/health" || true)
+            echo "$BODY"
+            VER=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("version",""))' "$BODY" 2>/dev/null || true)
+            [ "$VER" = "1.15.9" ] && exit 0
+            sleep 6
+          done
+          exit 1
 
-      - name: Exact TikTok metadata and thumbnail on Render
+      - name: Exact TikTok metadata and thumbnail
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS -L --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$TIKTOK_URL\"}" "$RENDER/api/info" | tee /tmp/tiktok-info.json
+          curl -fsS -L --max-time 90 -H 'Content-Type: application/json' -d "{\"url\":\"$TIKTOK_URL\"}" "$RENDER/api/info" | tee /tmp/tiktok-info.json
           python - <<'PY'
           import json
           x=json.load(open('/tmp/tiktok-info.json'))
@@ -37,14 +41,14 @@ jobs:
           assert x.get('choices')
           PY
 
-      - name: Exact TikTok end-to-end on Render
+      - name: Exact TikTok end-to-end download
         shell: bash
         run: |
           set -euo pipefail
           curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$TIKTOK_URL\",\"quality\":\"best\"}" "$RENDER/api/jobs" | tee /tmp/tiktok-job.json
           JOB=$(python -c 'import json; print(json.load(open("/tmp/tiktok-job.json"))["job_id"])')
           READY=0
-          for i in $(seq 1 60); do
+          for i in $(seq 1 90); do
             BODY=$(curl -fsS -L --max-time 20 "$RENDER/api/jobs/$JOB")
             echo "$BODY"
             STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
@@ -58,10 +62,18 @@ jobs:
           echo "tiktok_bytes=$BYTES"
           test "$BYTES" -gt 10000
 
+  shorts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RAILWAY: https://enhanced-video-production.up.railway.app
+      SHORT_URL: https://www.youtube.com/shorts/Xh7I5J8eDQY
+    steps:
       - name: Shorts end-to-end on Railway
         shell: bash
         run: |
           set -euo pipefail
+          curl -fsS -L --max-time 30 "$RAILWAY/health" >/tmp/health.json
           curl -fsS -L --max-time 45 -H 'Content-Type: application/json' -d "{\"url\":\"$SHORT_URL\"}" "$RAILWAY/api/info" >/tmp/short-info.json
           curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$SHORT_URL\",\"quality\":\"best\"}" "$RAILWAY/api/jobs" >/tmp/short-job.json
           JOB=$(python -c 'import json; print(json.load(open("/tmp/short-job.json"))["job_id"])')
