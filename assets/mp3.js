@@ -8,8 +8,9 @@
   const thumb=qs('#media-thumb');
   const titleEl=qs('#media-title');
   const metaEl=qs('#media-meta');
+  const mode=qs('#audio-mode');
   const downloadBtn=qs('#download-btn');
-  if(!input||!inspectBtn||!card||!statusEl||!downloadBtn)return;
+  if(!input||!inspectBtn||!card||!statusEl||!mode||!downloadBtn)return;
 
   let current=null;
   let inspectRun=0;
@@ -26,7 +27,7 @@
       .media-info{min-width:0}.media-title{font-weight:700;font-size:14px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       .media-meta{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.45}
       .media-actions{display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:13px}
-      .mp3-format{display:flex;align-items:center;min-height:44px;border:1px solid #303030;background:#0a0a0a;color:#fff;border-radius:13px;padding:0 13px;font-size:13px}
+      .audio-mode{width:100%;min-height:44px;border:1px solid #303030;background:#0a0a0a;color:#fff;border-radius:13px;padding:0 13px;font-size:13px;outline:none}
       .download-status-text{margin-top:12px;font-size:11px;color:var(--muted);min-height:16px}.download-status-text:empty{display:none}.download-status-text.error{color:#ff9d9d}
       .rvl-job-progress{display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
       .rvl-job-progress.show{display:block}.rvl-job-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;font-size:11px;color:#8d8d94}
@@ -65,10 +66,22 @@
     progressFill.style.width=`${pct}%`;progressPct.textContent=opts.indeterminate?'':`${pct}%`;progressStage.textContent=stage||text('Menyiapkan','Preparing');
   }
   function hideProgress(){progressWrap.classList.remove('show','indeterminate');progressFill.style.width='0%';progressPct.textContent='0%'}
+  function selectedFast(){return mode.value==='fast'}
+  function updateModeCopy(){
+    if(!current)return;
+    const bits=[];if(current.data.uploader)bits.push(current.data.uploader);
+    bits.push(selectedFast()?text('Audio cepat · tanpa convert','Fast audio · no conversion'):'MP3 · 192 kbps');
+    if(metaEl)metaEl.textContent=bits.join(' · ');
+    downloadBtn.textContent=selectedFast()?text('Download Audio','Download Audio'):'Download MP3';
+  }
   function applyStaticCopy(){
     const en=lang()==='en';const sub=qs('#page-sub');
-    if(sub)sub.textContent=en?'Paste a YouTube link and convert the audio to MP3.':'Tempel link YouTube, lalu convert audionya ke MP3.';
-    input.placeholder=en?'Paste YouTube link':'Tempel link YouTube';inspectBtn.textContent=en?'Check':'Cek';if(!downloadBtn.disabled)downloadBtn.textContent='Download MP3';
+    if(sub)sub.textContent=en?'Paste a YouTube link, then choose fast audio or MP3.':'Tempel link YouTube, lalu pilih audio cepat atau MP3.';
+    input.placeholder=en?'Paste YouTube link':'Tempel link YouTube';inspectBtn.textContent=en?'Check':'Cek';
+    const fastOpt=mode.querySelector('option[value="fast"]');const mp3Opt=mode.querySelector('option[value="mp3"]');
+    if(fastOpt)fastOpt.textContent=en?'Fast audio · no conversion':'Audio cepat · tanpa convert';
+    if(mp3Opt)mp3Opt.textContent='MP3 · 192 kbps';
+    if(!downloadBtn.disabled)updateModeCopy();
   }
   function reset(){current=null;card.classList.remove('show');downloadBtn.disabled=true;thumb?.removeAttribute('src');if(titleEl)titleEl.textContent='';if(metaEl)metaEl.textContent='';hideProgress()}
 
@@ -81,8 +94,7 @@
       const r=await fetch(`${RVL_API}/api/mp3/info`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url}),signal:inspectController.signal,cache:'no-store'});
       const data=await r.json().catch(()=>({}));if(run!==inspectRun)return;if(!r.ok)throw new Error(data.detail||text('Link nggak bisa dibaca.','Could not read this link.'));
       current={url,data};if(thumb){thumb.src=data.thumbnail||'';thumb.alt=data.title||'Media thumbnail'}if(titleEl)titleEl.textContent=data.title||'Untitled';
-      const bits=[];if(data.uploader)bits.push(data.uploader);bits.push('MP3 · 192 kbps');if(metaEl)metaEl.textContent=bits.join(' · ');
-      downloadBtn.disabled=false;downloadBtn.textContent='Download MP3';card.classList.add('show');hideProgress();setStatus('');
+      downloadBtn.disabled=false;card.classList.add('show');hideProgress();setStatus('');updateModeCopy();
     }catch(e){if(e.name==='AbortError'||run!==inspectRun)return;console.error(e);reset();setStatus(e.message||text('Gagal mengecek link.','Failed to check link.'),'error')}
     finally{if(run===inspectRun){inspectBtn.disabled=false;input.disabled=false;inspectController=null}}
   }
@@ -96,22 +108,37 @@
       setProgress(data.progress||0,data.stage||text('Menyiapkan MP3','Preparing MP3'));
       if(data.state==='ready'){
         setProgress(100,text('Selesai','Done'));frame.src=`${RVL_API}/api/jobs/${encodeURIComponent(jobId)}/file?_=${Date.now()}`;
-        downloadBtn.disabled=false;downloadBtn.textContent='Download MP3';setTimeout(()=>{if(run===downloadRun)hideProgress()},2600);return;
+        downloadBtn.disabled=false;updateModeCopy();setTimeout(()=>{if(run===downloadRun)hideProgress()},2200);return;
       }
       if(data.state==='error')throw new Error(data.error||text('Convert MP3 gagal.','MP3 conversion failed.'));
     }
   }
 
-  async function download(){
-    if(!current)return;const run=++downloadRun;setStatus('');downloadBtn.disabled=true;downloadBtn.textContent=text('Proses…','Processing…');setProgress(3,text('Menyiapkan MP3','Preparing MP3'));
-    try{
-      const r=await fetch(`${RVL_API}/api/mp3/jobs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url,quality:'audio'}),cache:'no-store'});
-      const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok||!data.job_id)throw new Error(data.detail||text('Gagal memulai MP3.','Could not start MP3 conversion.'));
-      setProgress(data.progress||3,text('Mulai','Starting'));await pollJob(data.job_id,run);
-    }catch(e){if(run!==downloadRun)return;console.error(e);hideProgress();setStatus(e.message||text('Convert MP3 gagal.','MP3 conversion failed.'),'error');downloadBtn.disabled=false;downloadBtn.textContent='Download MP3'}
+  async function downloadFast(run){
+    setProgress(18,text('Menyiapkan audio','Preparing audio'),{indeterminate:true});
+    const r=await fetch(`${RVL_API}/api/audio/prepare`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url}),cache:'no-store'});
+    const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;
+    if(!r.ok||!data.token)throw new Error(data.detail||text('Audio gagal disiapkan.','Could not prepare audio.'));
+    setProgress(100,text('Download dimulai','Download started'));
+    frame.src=`${RVL_API}/api/audio/stream/${encodeURIComponent(data.token)}?_=${Date.now()}`;
+    downloadBtn.disabled=false;updateModeCopy();setTimeout(()=>{if(run===downloadRun)hideProgress()},1600);
   }
 
-  inspectBtn.addEventListener('click',inspect);downloadBtn.addEventListener('click',download);input.addEventListener('keydown',e=>{if(e.key==='Enter')inspect()});
+  async function downloadMp3(run){
+    setProgress(3,text('Menyiapkan MP3','Preparing MP3'));
+    const r=await fetch(`${RVL_API}/api/mp3/jobs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url,quality:'audio'}),cache:'no-store'});
+    const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok||!data.job_id)throw new Error(data.detail||text('Gagal memulai MP3.','Could not start MP3 conversion.'));
+    setProgress(data.progress||3,text('Mulai','Starting'));await pollJob(data.job_id,run);
+  }
+
+  async function download(){
+    if(!current)return;const run=++downloadRun;setStatus('');downloadBtn.disabled=true;downloadBtn.textContent=text('Proses…','Processing…');
+    try{
+      if(selectedFast())await downloadFast(run);else await downloadMp3(run);
+    }catch(e){if(run!==downloadRun)return;console.error(e);hideProgress();setStatus(e.message||text('Download gagal.','Download failed.'),'error');downloadBtn.disabled=false;updateModeCopy()}
+  }
+
+  inspectBtn.addEventListener('click',inspect);downloadBtn.addEventListener('click',download);mode.addEventListener('change',()=>{++downloadRun;hideProgress();setStatus('');updateModeCopy()});input.addEventListener('keydown',e=>{if(e.key==='Enter')inspect()});
   input.addEventListener('input',()=>{if(current&&input.value.trim()!==current.url){++inspectRun;++downloadRun;if(inspectController)inspectController.abort();reset();setStatus('')}});
   window.addEventListener('reyval:lang',applyStaticCopy);applyStaticCopy();
 })();
