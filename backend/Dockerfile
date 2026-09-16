@@ -20,7 +20,7 @@ RUN git clone --depth 1 --branch 2.0.0 https://github.com/Brainicism/bgutil-ytdl
     && npm ci \
     && npx tsc
 
-COPY app.py ./
+COPY app.py stream_app.py ./
 
 EXPOSE 10000
-CMD ["sh", "-c", "node /opt/bgutil/server/build/main.js --host 127.0.0.1 --port 4416 >/tmp/bgutil.log 2>&1 & exec uvicorn app:app --host 0.0.0.0 --port ${PORT:-10000}"]
+CMD ["sh", "-c", "node /opt/bgutil/server/build/main.js --host 127.0.0.1 --port 4416 >/tmp/bgutil.log 2>&1 & exec uvicorn stream_app:app --host 0.0.0.0 --port ${PORT:-10000}"]
