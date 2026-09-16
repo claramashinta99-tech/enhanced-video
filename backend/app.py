@@ -11,7 +11,7 @@ from starlette.background import BackgroundTask
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
-APP_VERSION='1.8.0'
+APP_VERSION='1.8.1'
 app=FastAPI(title='RVL Media API',version=APP_VERSION)
 origins=[x.strip() for x in os.getenv('WEB_ORIGINS','https://reyval.web.id,https://www.reyval.web.id,http://localhost:5500,http://127.0.0.1:5500').split(',') if x.strip()]
 app.add_middleware(CORSMiddleware,allow_origins=origins,allow_credentials=False,allow_methods=['GET','POST','OPTIONS'],allow_headers=['Content-Type'])
@@ -117,32 +117,53 @@ def extract_info_sync(url):
     print(f"media info failed host={urlparse(url).hostname} attempts={','.join(errors)}",flush=True)
     raise DownloadError('media info failed')
 
-def max_height(info):
-    hs=[]
+def available_heights(info):
+    hs=set()
     for f in info.get('formats') or []:
         try:h=int(f.get('height') or 0)
         except (TypeError,ValueError):h=0
-        if h and f.get('vcodec')!='none':hs.append(h)
+        if h and f.get('vcodec')!='none':hs.add(h)
     try:
-        if int(info.get('height') or 0):hs.append(int(info['height']))
+        h=int(info.get('height') or 0)
+        if h:hs.add(h)
     except (TypeError,ValueError):pass
-    return max(hs,default=0)
+    return hs
+
+def max_height(info):return max(available_heights(info),default=0)
 
 def quality_choices(info,platform):
-    h=max_height(info); out=[{'id':'best','label':'Best quality'}]
+    hs=available_heights(info); out=[{'id':'best','label':'Best quality'}]
     if platform=='youtube':
-        if h>=2160:out.append({'id':'2160','label':'4K · 2160p'})
-        if h>=1440:out.append({'id':'1440','label':'2K · 1440p'})
-    if h>=1080:out.append({'id':'1080','label':'1080p'})
-    if h>=720:out.append({'id':'720','label':'720p'})
+        if 2160 in hs:out.append({'id':'2160','label':'4K · 2160p'})
+        if 1440 in hs:out.append({'id':'1440','label':'2K · 1440p'})
+    if 1080 in hs:out.append({'id':'1080','label':'1080p'})
+    if 720 in hs:out.append({'id':'720','label':'720p'})
     out.append({'id':'audio','label':'MP3 192 kbps'});return out
 
 def selector(quality):
-    caps={'2160':2160,'1440':1440,'1080':1080,'720':720}
-    if quality in caps:
-        h=caps[quality];return f'bv*[height<={h}]+ba/b[height<={h}]/best[height<={h}]/best',False
+    if quality in {'2160','1440','1080','720'}:
+        h=int(quality)
+        return f'bv*[height={h}]+ba/b[height={h}]',False
     if quality=='audio':return 'ba/bestaudio/best',True
     return 'bv*+ba/bestvideo*+bestaudio/best',False
+
+def selected_video_height(info):
+    vals=[]
+    for key in ('requested_formats','requested_downloads'):
+        for f in info.get(key) or []:
+            try:h=int(f.get('height') or 0)
+            except (TypeError,ValueError,AttributeError):h=0
+            if h and f.get('vcodec')!='none':vals.append(h)
+    try:
+        h=int(info.get('height') or 0)
+        if h:vals.append(h)
+    except (TypeError,ValueError):pass
+    return max(vals,default=0)
+
+def verify_quality(info,quality):
+    if quality not in {'2160','1440','1080','720'}:return
+    wanted=int(quality); actual=selected_video_height(info)
+    if actual and actual!=wanted:raise RuntimeError(f'resolution mismatch wanted={wanted} actual={actual}')
 
 def clear_workdir(w):
     root=Path(w)
@@ -168,7 +189,9 @@ def download_sync(url,quality,w):
     if cached:
         try:
             clear_workdir(w)
-            with YoutubeDL(dl_opts(url,quality,w,cached['strategy'])) as y:y.process_ie_result(copy.deepcopy(cached['info']),download=True)
+            with YoutubeDL(dl_opts(url,quality,w,cached['strategy'])) as y:
+                result=y.process_ie_result(copy.deepcopy(cached['info']),download=True)
+            verify_quality(result,quality)
             return find_output(w)
         except Exception as e:errors.append(f'cache:{type(e).__name__}')
     attempts=youtube_attempts() if is_youtube(url) else [{'name':'default','clients':None,'cookie':False}]
@@ -177,7 +200,8 @@ def download_sync(url,quality,w):
     for s in attempts:
         try:
             clear_workdir(w)
-            with YoutubeDL(dl_opts(url,quality,w,s)) as y:y.extract_info(url,download=True)
+            with YoutubeDL(dl_opts(url,quality,w,s)) as y:result=y.extract_info(url,download=True)
+            verify_quality(result,quality)
             return find_output(w)
         except Exception as e:errors.append(f"{s['name']}:{type(e).__name__}")
     print(f"media download failed host={urlparse(url).hostname} quality={quality} attempts={','.join(errors)}",flush=True)
@@ -189,6 +213,7 @@ def youtube_error(exc):
     if not c['exists']:return 'Cookie YouTube belum kebaca di Render.'
     if not c['valid']:return 'Cookie YouTube tidak valid.'
     if 'sign in' in m or 'not a bot' in m:return 'YouTube menolak sesi server. Cookie perlu diperbarui.'
+    if 'format' in m or 'resolution' in m:return 'Resolusi yang dipilih tidak tersedia dari sesi YouTube server.'
     return 'YouTube gagal menyiapkan file.'
 
 @app.get('/')
