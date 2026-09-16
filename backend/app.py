@@ -2,6 +2,7 @@ import asyncio
 import os
 import shutil
 import tempfile
+import threading
 from http.cookiejar import MozillaCookieJar, LoadError
 from pathlib import Path
 from urllib.parse import urlparse
@@ -14,7 +15,7 @@ from starlette.background import BackgroundTask
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
-app = FastAPI(title="RVL Media API", version="1.3.0")
+app = FastAPI(title="RVL Media API", version="1.4.0")
 
 origins = [x.strip() for x in os.getenv(
     "WEB_ORIGINS",
@@ -37,6 +38,9 @@ ALLOWED_HOSTS = {
 MAX_FILESIZE = 500 * 1024 * 1024
 DOWNLOAD_SLOTS = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENT_DOWNLOADS", "2")))
 YOUTUBE_COOKIE_FILE = Path(os.getenv("YOUTUBE_COOKIE_FILE", "/etc/secrets/youtube-cookies.txt"))
+YOUTUBE_COOKIE_WORK_FILE = Path("/tmp/rvl-youtube-cookies.txt")
+_cookie_lock = threading.Lock()
+_cookie_initialized = False
 
 
 class URLBody(BaseModel):
@@ -62,21 +66,16 @@ def is_youtube(url: str) -> bool:
     return "youtu" in host
 
 
-def youtube_cookie_status() -> dict:
-    status = {
-        "exists": False,
-        "valid": False,
-        "count": 0,
-        "size": 0,
-    }
+def cookie_file_status(path: Path) -> dict:
+    status = {"exists": False, "valid": False, "count": 0, "size": 0}
     try:
-        if not YOUTUBE_COOKIE_FILE.is_file():
+        if not path.is_file():
             return status
         status["exists"] = True
-        status["size"] = YOUTUBE_COOKIE_FILE.stat().st_size
+        status["size"] = path.stat().st_size
         if status["size"] <= 64:
             return status
-        jar = MozillaCookieJar(str(YOUTUBE_COOKIE_FILE))
+        jar = MozillaCookieJar(str(path))
         jar.load(ignore_discard=True, ignore_expires=True)
         status["count"] = sum(1 for _ in jar)
         status["valid"] = status["count"] > 0
@@ -85,8 +84,30 @@ def youtube_cookie_status() -> dict:
     return status
 
 
+def youtube_cookie_status() -> dict:
+    return cookie_file_status(YOUTUBE_COOKIE_FILE)
+
+
 def youtube_cookie_ready() -> bool:
     return youtube_cookie_status()["valid"]
+
+
+def get_writable_youtube_cookie() -> Path | None:
+    global _cookie_initialized
+    if not youtube_cookie_ready():
+        return None
+
+    with _cookie_lock:
+        if not _cookie_initialized:
+            try:
+                shutil.copyfile(YOUTUBE_COOKIE_FILE, YOUTUBE_COOKIE_WORK_FILE)
+                os.chmod(YOUTUBE_COOKIE_WORK_FILE, 0o600)
+                _cookie_initialized = True
+            except OSError as exc:
+                print(f"cookie copy error: {type(exc).__name__}: {exc}", flush=True)
+                return None
+
+    return YOUTUBE_COOKIE_WORK_FILE if YOUTUBE_COOKIE_WORK_FILE.is_file() else None
 
 
 def base_opts(url: str | None = None) -> dict:
@@ -101,15 +122,17 @@ def base_opts(url: str | None = None) -> dict:
         "restrictfilenames": False,
         "extractor_args": {
             "youtube": {
-                "player_client": ["mweb"],
+                "player_client": ["default", "mweb"],
             },
             "youtubepot-bgutilhttp": {
                 "base_url": ["http://127.0.0.1:4416"],
             },
         },
     }
-    if url and is_youtube(url) and youtube_cookie_ready():
-        opts["cookiefile"] = str(YOUTUBE_COOKIE_FILE)
+    if url and is_youtube(url):
+        cookie = get_writable_youtube_cookie()
+        if cookie:
+            opts["cookiefile"] = str(cookie)
     return opts
 
 
@@ -117,7 +140,9 @@ def extract_info_sync(url: str) -> dict:
     opts = base_opts(url)
     opts["skip_download"] = True
     with YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
+        # process=False avoids failing metadata lookup only because yt-dlp's
+        # default selected format is unavailable for one YouTube client.
+        info = ydl.extract_info(url, download=False, process=False)
     if not info:
         raise RuntimeError("Media tidak ditemukan.")
     if "entries" in info and info.get("entries"):
@@ -128,12 +153,12 @@ def extract_info_sync(url: str) -> dict:
 def format_selector(quality: str) -> tuple[str, bool]:
     quality = quality.lower().strip()
     if quality == "1080":
-        return "bv*[height<=1080]+ba/b[height<=1080]/best[height<=1080]", False
+        return "bv*[height<=1080]+ba/b[height<=1080]/bv[height<=1080]+ba/b", False
     if quality == "720":
-        return "bv*[height<=720]+ba/b[height<=720]/best[height<=720]", False
+        return "bv*[height<=720]+ba/b[height<=720]/bv[height<=720]+ba/b", False
     if quality == "audio":
-        return "ba/b", True
-    return "bv*+ba/b", False
+        return "ba/bestaudio/b", True
+    return "bv*+ba/b/bv+ba", False
 
 
 def download_sync(url: str, quality: str, workdir: str) -> Path:
@@ -172,6 +197,10 @@ def youtube_error_detail(exc: Exception) -> str:
         return "Cookie YouTube belum kebaca di Render. Tambahkan Secret File youtube-cookies.txt."
     if not cookie["valid"]:
         return "Cookie YouTube ada, tapi formatnya tidak valid. Export ulang sebagai Netscape cookies.txt."
+    if "read-only file system" in message:
+        return "Cookie YouTube kebaca, tapi backend belum bisa menulis cookie sementara."
+    if "requested format is not available" in message or "no video formats" in message:
+        return "Format YouTube dari client ini nggak tersedia. Backend akan coba client fallback di deploy terbaru."
     if "confirm you’re not a bot" in message or "confirm you're not a bot" in message or "sign in" in message:
         return "Cookie YouTube terbaca, tapi ditolak/expired. Export cookie baru lalu ganti Secret File di Render."
     return "YouTube gagal dibaca. Cek Logs Render untuk error yt-dlp terbaru."
@@ -183,7 +212,7 @@ async def root():
     return {
         "name": "RVL Media API",
         "status": "ok",
-        "version": "1.3.0",
+        "version": "1.4.0",
         "youtube_auth": cookie["valid"],
     }
 
@@ -191,10 +220,13 @@ async def root():
 @app.get("/health")
 async def health():
     cookie = youtube_cookie_status()
+    working = cookie_file_status(YOUTUBE_COOKIE_WORK_FILE)
     return {
         "ok": True,
+        "version": "1.4.0",
         "youtube_auth": cookie["valid"],
         "youtube_cookie": cookie,
+        "youtube_cookie_working": working,
     }
 
 
