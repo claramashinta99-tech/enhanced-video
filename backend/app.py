@@ -2,6 +2,7 @@ import asyncio
 import os
 import shutil
 import tempfile
+from http.cookiejar import MozillaCookieJar, LoadError
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -13,7 +14,7 @@ from starlette.background import BackgroundTask
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
-app = FastAPI(title="RVL Media API", version="1.2.0")
+app = FastAPI(title="RVL Media API", version="1.3.0")
 
 origins = [x.strip() for x in os.getenv(
     "WEB_ORIGINS",
@@ -61,11 +62,31 @@ def is_youtube(url: str) -> bool:
     return "youtu" in host
 
 
-def youtube_cookie_ready() -> bool:
+def youtube_cookie_status() -> dict:
+    status = {
+        "exists": False,
+        "valid": False,
+        "count": 0,
+        "size": 0,
+    }
     try:
-        return YOUTUBE_COOKIE_FILE.is_file() and YOUTUBE_COOKIE_FILE.stat().st_size > 64
-    except OSError:
-        return False
+        if not YOUTUBE_COOKIE_FILE.is_file():
+            return status
+        status["exists"] = True
+        status["size"] = YOUTUBE_COOKIE_FILE.stat().st_size
+        if status["size"] <= 64:
+            return status
+        jar = MozillaCookieJar(str(YOUTUBE_COOKIE_FILE))
+        jar.load(ignore_discard=True, ignore_expires=True)
+        status["count"] = sum(1 for _ in jar)
+        status["valid"] = status["count"] > 0
+    except (OSError, LoadError, ValueError):
+        pass
+    return status
+
+
+def youtube_cookie_ready() -> bool:
+    return youtube_cookie_status()["valid"]
 
 
 def base_opts(url: str | None = None) -> dict:
@@ -144,19 +165,37 @@ def cleanup(path: str) -> None:
     shutil.rmtree(path, ignore_errors=True)
 
 
+def youtube_error_detail(exc: Exception) -> str:
+    cookie = youtube_cookie_status()
+    message = str(exc).lower()
+    if not cookie["exists"]:
+        return "Cookie YouTube belum kebaca di Render. Tambahkan Secret File youtube-cookies.txt."
+    if not cookie["valid"]:
+        return "Cookie YouTube ada, tapi formatnya tidak valid. Export ulang sebagai Netscape cookies.txt."
+    if "confirm you’re not a bot" in message or "confirm you're not a bot" in message or "sign in" in message:
+        return "Cookie YouTube terbaca, tapi ditolak/expired. Export cookie baru lalu ganti Secret File di Render."
+    return "YouTube gagal dibaca. Cek Logs Render untuk error yt-dlp terbaru."
+
+
 @app.get("/")
 async def root():
+    cookie = youtube_cookie_status()
     return {
         "name": "RVL Media API",
         "status": "ok",
-        "version": "1.2.0",
-        "youtube_auth": youtube_cookie_ready(),
+        "version": "1.3.0",
+        "youtube_auth": cookie["valid"],
     }
 
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "youtube_auth": youtube_cookie_ready()}
+    cookie = youtube_cookie_status()
+    return {
+        "ok": True,
+        "youtube_auth": cookie["valid"],
+        "youtube_cookie": cookie,
+    }
 
 
 @app.post("/api/info")
@@ -166,16 +205,12 @@ async def media_info(body: URLBody):
         info = await asyncio.to_thread(extract_info_sync, url)
     except DownloadError as exc:
         print(f"yt-dlp info error for {url}: {exc}", flush=True)
-        if is_youtube(url) and "confirm you’re not a bot" in str(exc).lower():
-            detail = "YouTube minta autentikasi. Cookie server belum aktif atau sudah expired."
-        elif is_youtube(url) and "confirm you're not a bot" in str(exc).lower():
-            detail = "YouTube minta autentikasi. Cookie server belum aktif atau sudah expired."
-        else:
-            detail = "Media tidak bisa dibaca. Coba link lain."
+        detail = youtube_error_detail(exc) if is_youtube(url) else "Media tidak bisa dibaca. Coba link lain."
         raise HTTPException(status_code=422, detail=detail) from exc
     except Exception as exc:
         print(f"info error for {url}: {type(exc).__name__}: {exc}", flush=True)
-        raise HTTPException(status_code=500, detail="Gagal membaca media.") from exc
+        detail = youtube_error_detail(exc) if is_youtube(url) else "Gagal membaca media."
+        raise HTTPException(status_code=500, detail=detail) from exc
 
     host = (urlparse(url).hostname or "").lower()
     platform = "youtube" if "youtu" in host else "tiktok"
@@ -209,15 +244,13 @@ async def download_media(body: DownloadBody, request: Request):
     except DownloadError as exc:
         print(f"yt-dlp download error for {url}: {exc}", flush=True)
         cleanup(workdir)
-        if is_youtube(url) and ("confirm you’re not a bot" in str(exc).lower() or "confirm you're not a bot" in str(exc).lower()):
-            detail = "YouTube minta autentikasi. Cookie server belum aktif atau sudah expired."
-        else:
-            detail = "Download gagal. Video mungkin private, dibatasi, atau butuh login."
+        detail = youtube_error_detail(exc) if is_youtube(url) else "Download gagal. Video mungkin private, dibatasi, atau butuh login."
         raise HTTPException(status_code=422, detail=detail) from exc
     except Exception as exc:
         print(f"download error for {url}: {type(exc).__name__}: {exc}", flush=True)
         cleanup(workdir)
-        raise HTTPException(status_code=500, detail="Gagal menyiapkan file.") from exc
+        detail = youtube_error_detail(exc) if is_youtube(url) else "Gagal menyiapkan file."
+        raise HTTPException(status_code=500, detail=detail) from exc
 
     media_type = "audio/mpeg" if path.suffix.lower() == ".mp3" else "video/mp4"
     return FileResponse(
