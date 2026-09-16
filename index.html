@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#090909">
-  <meta name="description" content="RVL — Clarity, TikTok Downloader, dan YouTube Downloader dalam satu tempat.">
+  <meta name="description" content="RVL — Clarity, TikTok Downloader, YouTube Video Downloader, dan YouTube MP3 Downloader.">
   <title>RVL</title>
   <link rel="stylesheet" href="./assets/styles.css">
-  <link rel="stylesheet" href="./assets/home.css?v=1">
+  <link rel="stylesheet" href="./assets/home.css?v=2">
   <script defer src="./assets/common.js?v=20260916"></script>
   <script defer src="./assets/ambient.js?v=1"></script>
-  <script defer src="./assets/router.js?v=2"></script>
-  <script defer src="./assets/home.js?v=1"></script>
+  <script defer src="./assets/router.js?v=3"></script>
+  <script defer src="./assets/home.js?v=2"></script>
 </head>
 <body>
   <div class="shell">
@@ -33,16 +33,16 @@
             <span class="home-title-line" data-home-i18n="titleA">Tools video yang simpel.</span>
             <span class="home-title-line" data-home-i18n="titleB">Tinggal pakai.</span>
           </h1>
-          <p class="home-lead" data-home-i18n="lead">Clarity buat siapin video. TikTok &amp; YouTube Downloader buat download media tanpa muter-muter.</p>
+          <p class="home-lead" data-home-i18n="lead">Clarity buat siapin video. TikTok, YouTube Video, dan MP3 buat download sesuai kebutuhan.</p>
           <div class="home-actions">
             <a class="btn primary large" href="./clarity/"><span data-home-i18n="primary">Buka Clarity</span><span>↗</span></a>
             <a class="btn large" href="#tools" data-home-i18n="secondary">Lihat semua tools</a>
           </div>
-          <div class="home-live-note"><i></i><span data-home-i18n="active">3 tools aktif</span></div>
+          <div class="home-live-note"><i></i><span data-home-i18n="active">4 tools aktif</span></div>
         </div>
 
         <aside class="home-quick" aria-label="Quick access">
-          <div class="home-quick-head"><span data-home-i18n="quick">Quick access</span><span data-home-i18n="quickState">3 / 3 AKTIF</span></div>
+          <div class="home-quick-head"><span data-home-i18n="quick">Quick access</span><span data-home-i18n="quickState">4 / 4 AKTIF</span></div>
           <div class="home-quick-list">
             <a class="home-quick-row" href="./clarity/">
               <span class="home-quick-icon">◇</span>
@@ -56,7 +56,12 @@
             </a>
             <a class="home-quick-row" href="./youtube-downloader/">
               <span class="home-quick-icon">▷</span>
-              <span class="home-quick-copy"><strong>YouTube Downloader</strong><span data-home-i18n="miniYouTube">Video · MP3 · sampai 4K</span></span>
+              <span class="home-quick-copy"><strong>YouTube Video</strong><span data-home-i18n="miniYouTube">Video sampai 4K</span></span>
+              <span class="home-quick-arrow">↗</span>
+            </a>
+            <a class="home-quick-row" href="./youtube-mp3/">
+              <span class="home-quick-icon">♫</span>
+              <span class="home-quick-copy"><strong>YouTube MP3</strong><span data-home-i18n="miniMp3">Convert audio · 192 kbps</span></span>
               <span class="home-quick-arrow">↗</span>
             </a>
           </div>
@@ -93,8 +98,16 @@
         <a class="home-tool-card" href="./youtube-downloader/">
           <div class="home-tool-card-top"><span class="home-tool-number">03</span><span class="home-tool-status">AKTIF</span></div>
           <div class="home-tool-symbol">▷</div>
-          <h3>YouTube Downloader</h3>
-          <p data-home-i18n="youtubeDesc">Download video sampai 4K atau ambil MP3.</p>
+          <h3>YouTube Video</h3>
+          <p data-home-i18n="youtubeDesc">Download video YouTube sampai resolusi 4K.</p>
+          <div class="home-tool-open"><b data-home-i18n="open">Buka tool</b><span>↗</span></div>
+        </a>
+
+        <a class="home-tool-card" href="./youtube-mp3/">
+          <div class="home-tool-card-top"><span class="home-tool-number">04</span><span class="home-tool-status">AKTIF</span></div>
+          <div class="home-tool-symbol">♫</div>
+          <h3>YouTube MP3</h3>
+          <p data-home-i18n="mp3Desc">Ambil audio YouTube dan convert langsung ke MP3 192 kbps.</p>
           <div class="home-tool-open"><b data-home-i18n="open">Buka tool</b><span>↗</span></div>
         </a>
       </div>
