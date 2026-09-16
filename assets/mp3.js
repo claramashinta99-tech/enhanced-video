@@ -120,7 +120,7 @@
     const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;
     if(!r.ok||!data.token)throw new Error(data.detail||text('Audio gagal disiapkan.','Could not prepare audio.'));
     setProgress(100,text('Download dimulai','Download started'));
-    frame.src=`${RVL_API}/api/audio/stream/${encodeURIComponent(data.token)}?_=${Date.now()}`;
+    frame.src=`${RVL_API}/api/audio/chunked/${encodeURIComponent(data.token)}?_=${Date.now()}`;
     downloadBtn.disabled=false;updateModeCopy();setTimeout(()=>{if(run===downloadRun)hideProgress()},1600);
   }
 
