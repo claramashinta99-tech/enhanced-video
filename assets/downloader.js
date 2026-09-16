@@ -59,6 +59,7 @@
   function lang(){return localStorage.getItem('reyval-lang')||'id'}
   function text(id,en){return lang()==='en'?en:id}
   function fmtDuration(s){if(!Number.isFinite(Number(s)))return'';s=Math.round(Number(s));const m=Math.floor(s/60),sec=s%60;return `${m}:${String(sec).padStart(2,'0')}`}
+  function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
   function setStatus(msg='',type=''){statusEl.textContent=msg;statusEl.className='download-status-text'+(type?' '+type:'')}
   function validForPlatform(url){try{const h=new URL(url).hostname.toLowerCase();return platform==='youtube'?(/(^|\.)youtube\.com$/.test(h)||h==='youtu.be'):(/(^|\.)tiktok\.com$/.test(h));}catch{return false}}
   function showProgress(stage,state=''){
@@ -77,23 +78,60 @@
     if(!current)setStatus('');
   }
 
+  function renderMeta(data){
+    const bits=[];
+    if(data.uploader)bits.push(data.uploader);
+    if(data.duration)bits.push(fmtDuration(data.duration));
+    if(platform==='youtube'&&data.max_height)bits.push(`max ${data.max_height}p`);
+    if(metaEl)metaEl.textContent=bits.join(' · ');
+  }
+
+  function renderChoices(list,preserve=true){
+    const old=preserve?quality.value:'';
+    quality.innerHTML='';
+    (list||[]).forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.label;quality.appendChild(o)});
+    if(old&&[...quality.options].some(o=>o.value===old))quality.value=old;
+  }
+
+  function renderMedia(data,preserveChoice=false){
+    if(thumb){thumb.src=data.thumbnail||'';thumb.alt=data.title||'Media thumbnail'}
+    if(titleEl)titleEl.textContent=data.title||'Untitled';
+    renderMeta(data);renderChoices(data.choices||[],preserveChoice);
+    quality.disabled=false;downloadBtn.disabled=false;downloadBtn.textContent='Download';card.classList.add('show');
+  }
+
   function resetMediaCard(){
     current=null;card.classList.remove('show');downloadBtn.disabled=true;quality.disabled=true;thumb?.removeAttribute('src');
     if(titleEl)titleEl.textContent='';if(metaEl)metaEl.textContent='';quality.innerHTML='';hideProgress();
+  }
+
+  async function pollYoutubeScan(run,url){
+    for(let i=0;i<36&&run===inspectRun;i++){
+      await sleep(600);
+      if(run!==inspectRun||!current||current.url!==url)return;
+      try{
+        const r=await fetch(`${RVL_API}/api/quick-info/status?url=${encodeURIComponent(url)}&_=${Date.now()}`,{cache:'no-store'});
+        const data=await r.json().catch(()=>({}));
+        if(run!==inspectRun||!current||current.url!==url)return;
+        if(data.ready){
+          current.data=data;renderMedia(data,true);return;
+        }
+        if(data.failed)return;
+      }catch{return}
+    }
   }
 
   async function inspect(){
     const url=input.value.trim();const run=++inspectRun;++downloadRun;
     if(inspectController)inspectController.abort();inspectController=new AbortController();resetMediaCard();setStatus('');
     if(!validForPlatform(url)){setStatus(text(platform==='youtube'?'Tempel link YouTube yang valid.':'Tempel link TikTok yang valid.',platform==='youtube'?'Paste a valid YouTube link.':'Paste a valid TikTok link.'),'error');return}
-    inspectBtn.disabled=true;input.disabled=true;showProgress(text('Mengecek link','Checking link'));
+    inspectBtn.disabled=true;input.disabled=true;showProgress(text('Mengecek','Checking'));
     try{
-      const r=await fetch(`${RVL_API}/api/info`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url}),signal:inspectController.signal,cache:'no-store'});
+      const endpoint=platform==='youtube'?'/api/quick-info':'/api/info';
+      const r=await fetch(`${RVL_API}${endpoint}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url}),signal:inspectController.signal,cache:'no-store'});
       const data=await r.json().catch(()=>({}));if(run!==inspectRun)return;if(!r.ok)throw new Error(data.detail||text('Link nggak bisa dibaca.','Could not read this link.'));
-      current={url,data};if(thumb){thumb.src=data.thumbnail||'';thumb.alt=data.title||'Media thumbnail'}if(titleEl)titleEl.textContent=data.title||'Untitled';
-      const bits=[];if(data.uploader)bits.push(data.uploader);if(data.duration)bits.push(fmtDuration(data.duration));if(platform==='youtube'&&data.max_height)bits.push(`max ${data.max_height}p`);if(metaEl)metaEl.textContent=bits.join(' · ');
-      (data.choices||[]).forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.label;quality.appendChild(o)});
-      quality.disabled=false;downloadBtn.disabled=false;downloadBtn.textContent='Download';card.classList.add('show');hideProgress();setStatus('');
+      current={url,data};renderMedia(data,false);hideProgress();setStatus('');
+      if(platform==='youtube'&&!data.scan_ready)pollYoutubeScan(run,url);
     }catch(e){if(e.name==='AbortError'||run!==inspectRun)return;console.error(e);resetMediaCard();setStatus(e.message||text('Gagal mengecek link.','Failed to check link.'),'error')}
     finally{if(run===inspectRun){inspectBtn.disabled=false;input.disabled=false;inspectController=null}}
   }
@@ -101,7 +139,7 @@
   async function download(){
     if(!current)return;const run=++downloadRun;const selected=quality.value;
     setStatus('');downloadBtn.disabled=true;quality.disabled=true;downloadBtn.textContent=text('Menyiapkan…','Preparing…');
-    showProgress(text(selected==='audio'?'Menyiapkan MP3':'Menyiapkan stream',selected==='audio'?'Preparing MP3':'Preparing stream'));
+    showProgress(text(selected==='audio'?'Menyiapkan MP3':'Menyiapkan download',selected==='audio'?'Preparing MP3':'Preparing download'));
     try{
       const r=await fetch(`${RVL_API}/api/stream/prepare`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url,quality:selected}),cache:'no-store'});
       const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;
@@ -109,7 +147,7 @@
       markReady();
       frame.src=`${RVL_API}/api/stream/${encodeURIComponent(data.token)}?_=${Date.now()}`;
       downloadBtn.disabled=false;quality.disabled=false;downloadBtn.textContent='Download';
-      setTimeout(()=>{if(run===downloadRun)hideProgress()},1800);
+      setTimeout(()=>{if(run===downloadRun)hideProgress()},1400);
     }catch(e){if(run!==downloadRun)return;console.error(e);hideProgress();setStatus(e.message||text('Download gagal.','Download failed.'),'error');downloadBtn.disabled=false;quality.disabled=false;downloadBtn.textContent='Download'}
   }
 
