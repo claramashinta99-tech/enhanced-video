@@ -3,9 +3,11 @@
   window.__rvlRailwayBridge=true;
   const FROM='https://rvl-api.onrender.com';
   const TO='https://enhanced-video-production.up.railway.app';
+  const useRailway=()=>document.body?.dataset?.platform!=='tiktok';
   const rewrite=value=>{
     try{
       const s=String(value||'');
+      if(!useRailway())return s;
       return s.startsWith(FROM)?TO+s.slice(FROM.length):s;
     }catch{return value}
   };
