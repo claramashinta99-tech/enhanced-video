@@ -3,7 +3,7 @@
   window.__rvlRailwayBridge=true;
   const FROM='https://rvl-api.onrender.com';
   const TO='https://enhanced-video-production.up.railway.app';
-  const useRailway=()=>document.body?.dataset?.platform!=='tiktok';
+  const useRailway=()=>true;
   const rewrite=value=>{
     try{
       const s=String(value||'');
