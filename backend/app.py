@@ -13,7 +13,7 @@ from starlette.background import BackgroundTask
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
-app = FastAPI(title="RVL Media API", version="1.1.0")
+app = FastAPI(title="RVL Media API", version="1.2.0")
 
 origins = [x.strip() for x in os.getenv(
     "WEB_ORIGINS",
@@ -35,6 +35,7 @@ ALLOWED_HOSTS = {
 
 MAX_FILESIZE = 500 * 1024 * 1024
 DOWNLOAD_SLOTS = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENT_DOWNLOADS", "2")))
+YOUTUBE_COOKIE_FILE = Path(os.getenv("YOUTUBE_COOKIE_FILE", "/etc/secrets/youtube-cookies.txt"))
 
 
 class URLBody(BaseModel):
@@ -55,8 +56,20 @@ def validate_url(value: str) -> str:
     return url
 
 
-def base_opts() -> dict:
-    return {
+def is_youtube(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return "youtu" in host
+
+
+def youtube_cookie_ready() -> bool:
+    try:
+        return YOUTUBE_COOKIE_FILE.is_file() and YOUTUBE_COOKIE_FILE.stat().st_size > 64
+    except OSError:
+        return False
+
+
+def base_opts(url: str | None = None) -> dict:
+    opts = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
@@ -74,10 +87,13 @@ def base_opts() -> dict:
             },
         },
     }
+    if url and is_youtube(url) and youtube_cookie_ready():
+        opts["cookiefile"] = str(YOUTUBE_COOKIE_FILE)
+    return opts
 
 
 def extract_info_sync(url: str) -> dict:
-    opts = base_opts()
+    opts = base_opts(url)
     opts["skip_download"] = True
     with YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -101,7 +117,7 @@ def format_selector(quality: str) -> tuple[str, bool]:
 
 def download_sync(url: str, quality: str, workdir: str) -> Path:
     selector, audio_only = format_selector(quality)
-    opts = base_opts()
+    opts = base_opts(url)
     opts.update({
         "format": selector,
         "outtmpl": str(Path(workdir) / "%(title).80B [%(id)s].%(ext)s"),
@@ -130,12 +146,17 @@ def cleanup(path: str) -> None:
 
 @app.get("/")
 async def root():
-    return {"name": "RVL Media API", "status": "ok", "version": "1.1.0"}
+    return {
+        "name": "RVL Media API",
+        "status": "ok",
+        "version": "1.2.0",
+        "youtube_auth": youtube_cookie_ready(),
+    }
 
 
 @app.get("/health")
 async def health():
-    return {"ok": True}
+    return {"ok": True, "youtube_auth": youtube_cookie_ready()}
 
 
 @app.post("/api/info")
@@ -145,7 +166,13 @@ async def media_info(body: URLBody):
         info = await asyncio.to_thread(extract_info_sync, url)
     except DownloadError as exc:
         print(f"yt-dlp info error for {url}: {exc}", flush=True)
-        raise HTTPException(status_code=422, detail="Media tidak bisa dibaca. Coba link lain.") from exc
+        if is_youtube(url) and "confirm you’re not a bot" in str(exc).lower():
+            detail = "YouTube minta autentikasi. Cookie server belum aktif atau sudah expired."
+        elif is_youtube(url) and "confirm you're not a bot" in str(exc).lower():
+            detail = "YouTube minta autentikasi. Cookie server belum aktif atau sudah expired."
+        else:
+            detail = "Media tidak bisa dibaca. Coba link lain."
+        raise HTTPException(status_code=422, detail=detail) from exc
     except Exception as exc:
         print(f"info error for {url}: {type(exc).__name__}: {exc}", flush=True)
         raise HTTPException(status_code=500, detail="Gagal membaca media.") from exc
@@ -182,7 +209,11 @@ async def download_media(body: DownloadBody, request: Request):
     except DownloadError as exc:
         print(f"yt-dlp download error for {url}: {exc}", flush=True)
         cleanup(workdir)
-        raise HTTPException(status_code=422, detail="Download gagal. Video mungkin private, dibatasi, atau butuh login.") from exc
+        if is_youtube(url) and ("confirm you’re not a bot" in str(exc).lower() or "confirm you're not a bot" in str(exc).lower()):
+            detail = "YouTube minta autentikasi. Cookie server belum aktif atau sudah expired."
+        else:
+            detail = "Download gagal. Video mungkin private, dibatasi, atau butuh login."
+        raise HTTPException(status_code=422, detail=detail) from exc
     except Exception as exc:
         print(f"download error for {url}: {type(exc).__name__}: {exc}", flush=True)
         cleanup(workdir)
