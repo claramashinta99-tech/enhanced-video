@@ -1,4 +1,4 @@
-import asyncio, copy, os, shutil, tempfile, threading, time, urllib.request
+import asyncio, copy, os, shutil, subprocess, tempfile, threading, time, urllib.request
 from http.cookiejar import LoadError, MozillaCookieJar
 from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
@@ -11,7 +11,7 @@ from starlette.background import BackgroundTask
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
-APP_VERSION='1.8.1'
+APP_VERSION='1.8.2'
 app=FastAPI(title='RVL Media API',version=APP_VERSION)
 origins=[x.strip() for x in os.getenv('WEB_ORIGINS','https://reyval.web.id,https://www.reyval.web.id,http://localhost:5500,http://127.0.0.1:5500').split(',') if x.strip()]
 app.add_middleware(CORSMiddleware,allow_origins=origins,allow_credentials=False,allow_methods=['GET','POST','OPTIONS'],allow_headers=['Content-Type'])
@@ -24,6 +24,7 @@ POT_URL=os.getenv('YOUTUBE_POT_URL','http://127.0.0.1:4416')
 YOUTUBE_UA=os.getenv('YOUTUBE_USER_AGENT','Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36')
 CACHE_TTL=int(os.getenv('MEDIA_CACHE_TTL','900')); CACHE_MAX=int(os.getenv('MEDIA_CACHE_MAX','40'))
 _cookie_lock=threading.Lock(); _cookie_initialized=False; _cache_lock=threading.Lock(); _media_cache={}
+EXACT_QUALITIES={'2160':2160,'1440':1440,'1080':1080,'720':720}
 
 class URLBody(BaseModel): url:HttpUrl
 class DownloadBody(BaseModel): url:HttpUrl; quality:str='best'
@@ -117,53 +118,69 @@ def extract_info_sync(url):
     print(f"media info failed host={urlparse(url).hostname} attempts={','.join(errors)}",flush=True)
     raise DownloadError('media info failed')
 
+def format_size(f):
+    try:return int(f.get('filesize') or f.get('filesize_approx') or 0)
+    except (TypeError,ValueError,AttributeError):return 0
+
+def exact_format_parts(info,target):
+    videos=[]; audios=[]
+    for f in info.get('formats') or []:
+        if not isinstance(f,dict) or not f.get('format_id'):continue
+        try:h=int(f.get('height') or 0)
+        except (TypeError,ValueError):h=0
+        v=f.get('vcodec'); a=f.get('acodec')
+        if h==target and v and v!='none':videos.append(f)
+        if (not v or v=='none') and a and a!='none':audios.append(f)
+    if not videos:return None,None
+    def video_rank(f):
+        ext=1 if f.get('ext') in {'mp4','m4v'} else 0
+        try:tbr=float(f.get('tbr') or f.get('vbr') or 0)
+        except (TypeError,ValueError):tbr=0
+        return (ext,format_size(f),tbr)
+    def audio_rank(f):
+        ext=1 if f.get('ext') in {'m4a','mp4'} else 0
+        try:abr=float(f.get('abr') or f.get('tbr') or 0)
+        except (TypeError,ValueError):abr=0
+        return (ext,format_size(f),abr)
+    video=max(videos,key=video_rank); audio=max(audios,key=audio_rank) if audios else None
+    return video,audio
+
+def exact_selector(info,quality):
+    if quality not in EXACT_QUALITIES:return None
+    video,audio=exact_format_parts(info,EXACT_QUALITIES[quality])
+    if not video:return None
+    return f"{video['format_id']}+{audio['format_id']}" if audio else str(video['format_id'])
+
+def estimated_quality_size(info,quality):
+    if quality not in EXACT_QUALITIES:return 0
+    video,audio=exact_format_parts(info,EXACT_QUALITIES[quality])
+    return format_size(video or {})+format_size(audio or {})
+
 def available_heights(info):
     hs=set()
     for f in info.get('formats') or []:
         try:h=int(f.get('height') or 0)
         except (TypeError,ValueError):h=0
         if h and f.get('vcodec')!='none':hs.add(h)
-    try:
-        h=int(info.get('height') or 0)
-        if h:hs.add(h)
-    except (TypeError,ValueError):pass
     return hs
 
 def max_height(info):return max(available_heights(info),default=0)
+def human_mb(n):return f'{n/1048576:.1f} MB' if n else None
 
 def quality_choices(info,platform):
     hs=available_heights(info); out=[{'id':'best','label':'Best quality'}]
-    if platform=='youtube':
-        if 2160 in hs:out.append({'id':'2160','label':'4K · 2160p'})
-        if 1440 in hs:out.append({'id':'1440','label':'2K · 1440p'})
-    if 1080 in hs:out.append({'id':'1080','label':'1080p'})
-    if 720 in hs:out.append({'id':'720','label':'720p'})
+    for q,label in [('2160','4K · 2160p'),('1440','2K · 1440p'),('1080','1080p'),('720','720p')]:
+        h=int(q)
+        if h not in hs or (platform!='youtube' and h>1080):continue
+        est=estimated_quality_size(info,q) if platform=='youtube' else 0
+        out.append({'id':q,'label':f'{label} · ~{human_mb(est)}' if est else label,'estimated_bytes':est or None})
     out.append({'id':'audio','label':'MP3 192 kbps'});return out
 
 def selector(quality):
-    if quality in {'2160','1440','1080','720'}:
-        h=int(quality)
-        return f'bv*[height={h}]+ba/b[height={h}]',False
+    if quality in EXACT_QUALITIES:
+        h=EXACT_QUALITIES[quality];return f'bv*[height={h}]+ba/b[height={h}]',False
     if quality=='audio':return 'ba/bestaudio/best',True
     return 'bv*+ba/bestvideo*+bestaudio/best',False
-
-def selected_video_height(info):
-    vals=[]
-    for key in ('requested_formats','requested_downloads'):
-        for f in info.get(key) or []:
-            try:h=int(f.get('height') or 0)
-            except (TypeError,ValueError,AttributeError):h=0
-            if h and f.get('vcodec')!='none':vals.append(h)
-    try:
-        h=int(info.get('height') or 0)
-        if h:vals.append(h)
-    except (TypeError,ValueError):pass
-    return max(vals,default=0)
-
-def verify_quality(info,quality):
-    if quality not in {'2160','1440','1080','720'}:return
-    wanted=int(quality); actual=selected_video_height(info)
-    if actual and actual!=wanted:raise RuntimeError(f'resolution mismatch wanted={wanted} actual={actual}')
 
 def clear_workdir(w):
     root=Path(w)
@@ -172,9 +189,10 @@ def clear_workdir(w):
         try:shutil.rmtree(p,ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)
         except OSError:pass
 
-def dl_opts(url,quality,w,s):
+def dl_opts(url,quality,w,s,format_override=None):
     fmt,audio=selector(quality)
-    if s.get('selector') and quality=='best':fmt=s['selector']
+    if format_override:fmt=format_override
+    elif s.get('selector') and quality=='best':fmt=s['selector']
     o=base_opts(url,s.get('clients'),s.get('cookie',False));o.update({'format':fmt,'outtmpl':str(Path(w)/'%(title).80B [%(id)s].%(ext)s'),'merge_output_format':'mp4','windowsfilenames':True})
     if audio:o['postprocessors']=[{'key':'FFmpegExtractAudio','preferredcodec':'mp3','preferredquality':'192'}]
     return o
@@ -184,25 +202,46 @@ def find_output(w):
     if not fs:raise RuntimeError('File hasil tidak ditemukan.')
     return max(fs,key=lambda p:p.stat().st_mtime)
 
+def probe_dimensions(path):
+    if path.suffix.lower()=='.mp3':return (0,0)
+    try:
+        raw=subprocess.check_output(['ffprobe','-v','error','-select_streams','v:0','-show_entries','stream=width,height','-of','csv=p=0:s=x',str(path)],text=True,timeout=15).strip().splitlines()[0]
+        w,h=raw.split('x',1);return int(w),int(h)
+    except Exception:return (0,0)
+
+def verify_file_quality(path,quality):
+    if quality not in EXACT_QUALITIES:return
+    wanted=EXACT_QUALITIES[quality]; w,h=probe_dimensions(path)
+    if not h:raise RuntimeError('ffprobe could not verify output resolution')
+    if h!=wanted:raise RuntimeError(f'output resolution mismatch wanted={wanted} got={w}x{h}')
+
+def add_quality_suffix(path,quality):
+    if quality not in EXACT_QUALITIES:return path
+    tag=f'[{quality}p]'; new=path.with_name(f'{path.stem} {tag}{path.suffix}')
+    if new!=path:path.rename(new)
+    return new
+
+def download_from_info(url,quality,w,info,strategy):
+    fmt=exact_selector(info,quality)
+    if quality in EXACT_QUALITIES and not fmt:raise RuntimeError(f'exact {quality}p format not present')
+    clear_workdir(w)
+    with YoutubeDL(dl_opts(url,quality,w,strategy,fmt)) as y:y.process_ie_result(copy.deepcopy(info),download=True)
+    path=find_output(w);verify_file_quality(path,quality);return add_quality_suffix(path,quality)
+
 def download_sync(url,quality,w):
     cached=cache_get(url); errors=[]
     if cached:
-        try:
-            clear_workdir(w)
-            with YoutubeDL(dl_opts(url,quality,w,cached['strategy'])) as y:
-                result=y.process_ie_result(copy.deepcopy(cached['info']),download=True)
-            verify_quality(result,quality)
-            return find_output(w)
+        try:return download_from_info(url,quality,w,cached['info'],cached['strategy'])
         except Exception as e:errors.append(f'cache:{type(e).__name__}')
     attempts=youtube_attempts() if is_youtube(url) else [{'name':'default','clients':None,'cookie':False}]
     if cached:
         preferred=cached['strategy']['name'];attempts.sort(key=lambda x:0 if x['name']==preferred else 1)
     for s in attempts:
         try:
-            clear_workdir(w)
-            with YoutubeDL(dl_opts(url,quality,w,s)) as y:result=y.extract_info(url,download=True)
-            verify_quality(result,quality)
-            return find_output(w)
+            o=base_opts(url,s.get('clients'),s.get('cookie',False));o['skip_download']=True
+            with YoutubeDL(o) as y:info=y.extract_info(url,download=False,process=False)
+            if info.get('entries'):info=next((x for x in info['entries'] if x),info)
+            path=download_from_info(url,quality,w,info,s);cache_put(url,info,s);return path
         except Exception as e:errors.append(f"{s['name']}:{type(e).__name__}")
     print(f"media download failed host={urlparse(url).hostname} quality={quality} attempts={','.join(errors)}",flush=True)
     raise DownloadError('download failed')
@@ -213,13 +252,12 @@ def youtube_error(exc):
     if not c['exists']:return 'Cookie YouTube belum kebaca di Render.'
     if not c['valid']:return 'Cookie YouTube tidak valid.'
     if 'sign in' in m or 'not a bot' in m:return 'YouTube menolak sesi server. Cookie perlu diperbarui.'
-    if 'format' in m or 'resolution' in m:return 'Resolusi yang dipilih tidak tersedia dari sesi YouTube server.'
-    return 'YouTube gagal menyiapkan file.'
+    return 'YouTube gagal menyiapkan file atau resolusi asli tidak tersedia dari sesi server.'
 
 @app.get('/')
 async def root():return {'name':'RVL Media API','status':'ok','version':APP_VERSION,'youtube_auth':youtube_cookie_ready()}
 @app.get('/health')
-async def health():return {'ok':True,'version':APP_VERSION,'youtube_auth':youtube_cookie_ready(),'youtube_cookie':youtube_cookie_status(),'youtube_cookie_working':cookie_status(YOUTUBE_COOKIE_WORK_FILE),'yt_dlp':package_version('yt-dlp'),'yt_dlp_ejs':package_version('yt-dlp-ejs'),'js_runtime':'node','pot_provider':pot_provider_status(),'media_cache':len(_media_cache),'youtube_strategy':'cached>mweb-cookie>default-cookie>safari-cookie>public-fallback'}
+async def health():return {'ok':True,'version':APP_VERSION,'youtube_auth':youtube_cookie_ready(),'youtube_cookie':youtube_cookie_status(),'youtube_cookie_working':cookie_status(YOUTUBE_COOKIE_WORK_FILE),'yt_dlp':package_version('yt-dlp'),'yt_dlp_ejs':package_version('yt-dlp-ejs'),'js_runtime':'node','pot_provider':pot_provider_status(),'ffprobe':shutil.which('ffprobe') is not None,'media_cache':len(_media_cache),'youtube_strategy':'exact-format-id>ffprobe-verify>fallback'}
 @app.post('/api/info')
 async def media_info(body:URLBody):
     url=validate_url(body.url)
