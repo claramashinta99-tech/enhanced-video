@@ -13,7 +13,6 @@ const downloadBtn=qs('#download-btn');
 let current=null;
 let inspectRun=0;
 let inspectController=null;
-let downloadRun=0;
 
 const css=document.createElement('style');
 css.textContent=`
@@ -21,12 +20,17 @@ css.textContent=`
 `;
 document.head.appendChild(css);
 
+const frame=document.createElement('iframe');
+frame.name='rvl-download-frame';
+frame.id='rvl-download-frame';
+frame.style.display='none';
+document.body.appendChild(frame);
+
 function lang(){return localStorage.getItem('reyval-lang')||'id'}
 function text(id,en){return lang()==='en'?en:id}
 function fmtDuration(s){if(!Number.isFinite(Number(s)))return'';s=Math.round(Number(s));const m=Math.floor(s/60),sec=s%60;return `${m}:${String(sec).padStart(2,'0')}`}
 function setStatus(msg='',type=''){statusEl.textContent=msg;statusEl.className='download-status-text'+(type?' '+type:'')}
 function validForPlatform(url){try{const h=new URL(url).hostname.toLowerCase();return platform==='youtube'?(/(^|\.)youtube\.com$/.test(h)||h==='youtu.be'):(/(^|\.)tiktok\.com$/.test(h));}catch{return false}}
-function filenameFromDisposition(value,fallback){const m=value&&value.match(/filename\*=UTF-8''([^;]+)/i);if(m){try{return decodeURIComponent(m[1])}catch{}}const q=value&&value.match(/filename="([^"]+)"/i);return q?q[1]:fallback}
 function applyStaticCopy(){
   const en=lang()==='en';
   const sub=qs('#page-sub');
@@ -100,35 +104,12 @@ async function inspect(){
   }
 }
 
-async function download(){
+function download(){
   if(!current)return;
-  const run=++downloadRun;
-  const url=current.url;
   const selected=quality.value;
-  downloadBtn.disabled=true;
-  quality.disabled=true;
-  inspectBtn.disabled=true;
-  setStatus(text('Menyiapkan file… ini bisa beberapa saat.','Preparing file… this may take a moment.'));
-  try{
-    const r=await fetch(`${RVL_API}/api/download`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,quality:selected}),cache:'no-store'});
-    if(run!==downloadRun)return;
-    if(!r.ok){const data=await r.json().catch(()=>({}));throw new Error(data.detail||text('Download gagal.','Download failed.'))}
-    const blob=await r.blob();
-    const ext=selected==='audio'?'mp3':'mp4';
-    const fallback=`RVL-${platform}-${Date.now()}.${ext}`;
-    const name=filenameFromDisposition(r.headers.get('content-disposition'),fallback);
-    const a=document.createElement('a');
-    const objectURL=URL.createObjectURL(blob);
-    a.href=objectURL;a.download=name;document.body.appendChild(a);a.click();a.remove();
-    setTimeout(()=>URL.revokeObjectURL(objectURL),30000);
-    setStatus(text('Selesai. File udah mulai didownload.','Done. Your download has started.'),'ok');
-  }catch(e){
-    if(run!==downloadRun)return;
-    console.error(e);
-    setStatus(e.message||text('Download gagal.','Download failed.'),'error');
-  }finally{
-    if(run===downloadRun){downloadBtn.disabled=!current;quality.disabled=!current;inspectBtn.disabled=false}
-  }
+  const directURL=`${RVL_API}/api/download?url=${encodeURIComponent(current.url)}&quality=${encodeURIComponent(selected)}&_=${Date.now()}`;
+  setStatus(text('Menyiapkan file… download akan mulai otomatis.','Preparing file… the download will start automatically.'));
+  frame.src=directURL;
 }
 
 inspectBtn.addEventListener('click',inspect);
