@@ -13,25 +13,31 @@ jobs:
       API: https://rvl-api.onrender.com
       SHORT: https://www.youtube.com/shorts/hLKiVtoD83k
     steps:
-      - name: Wait for backend v1.15.0
+      - name: Wait for backend v1.15.1
         shell: bash
         run: |
           set -euo pipefail
           for i in $(seq 1 36); do
             BODY=$(curl -fsS --max-time 25 "$API/health" || true)
             echo "$BODY"
-            if echo "$BODY" | grep -q '"version":"1.15.0"'; then exit 0; fi
+            if echo "$BODY" | grep -q '"version":"1.15.1"'; then exit 0; fi
             sleep 10
           done
-          echo 'backend did not reach v1.15.0 in time' >&2
+          echo 'backend did not reach v1.15.1 in time' >&2
           exit 1
+
+      - name: Show YouTube engine
+        run: curl -fsS --max-time 25 "$API/api/youtube/engine"
 
       - name: Read Shorts metadata
         shell: bash
         run: |
           set -euo pipefail
           PAYLOAD=$(python -c 'import json,os; print(json.dumps({"url":os.environ["SHORT"]}))')
-          curl -fsS --max-time 60 -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/info" -o /tmp/info.json
+          START=$(date +%s)
+          curl -fsS --max-time 45 -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/info" -o /tmp/info.json
+          END=$(date +%s)
+          echo "metadata_seconds=$((END-START))"
           cat /tmp/info.json
           python - <<'PY'
           import json
@@ -47,7 +53,7 @@ jobs:
         run: |
           set -euo pipefail
           PAYLOAD=$(python -c 'import json,os; print(json.dumps({"url":os.environ["SHORT"],"quality":"best"}))')
-          curl -fsS --max-time 60 -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/jobs" -o /tmp/job.json
+          curl -fsS --max-time 45 -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/jobs" -o /tmp/job.json
           cat /tmp/job.json
           JOB=$(python -c 'import json; print(json.load(open("/tmp/job.json"))["job_id"])')
           for i in $(seq 1 90); do
