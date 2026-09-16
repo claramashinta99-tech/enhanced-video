@@ -51,11 +51,11 @@ def youtube_attempts():
 
 
 SELFTEST_STRATEGIES = [
+    {'name': 'visionos-studio-skip', 'clients': ['visionos'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs'], 'innertube_host': 'studio.youtube.com'},
+    {'name': 'visionos-music-skip', 'clients': ['visionos'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs'], 'innertube_host': 'music.youtube.com'},
+    {'name': 'visionos-mobile-skip', 'clients': ['visionos'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs'], 'innertube_host': 'm.youtube.com'},
+    {'name': 'visionos-nocookie-skip', 'clients': ['visionos'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs'], 'innertube_host': 'www.youtube-nocookie.com'},
     {'name': 'visionos-googleapis-skip', 'clients': ['visionos'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs'], 'innertube_host': 'youtubei.googleapis.com'},
-    {'name': 'android-googleapis-skip', 'clients': ['android'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs'], 'innertube_host': 'youtubei.googleapis.com'},
-    {'name': 'ios-googleapis-skip', 'clients': ['ios'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs'], 'innertube_host': 'youtubei.googleapis.com'},
-    {'name': 'visionos-noplugin-skip', 'clients': ['visionos'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs']},
-    {'name': 'mweb-pot-skip', 'clients': ['mweb'], 'cookie': False, 'player_skip': ['webpage', 'configs']},
 ]
 
 
@@ -202,32 +202,15 @@ def _timed_http(url, timeout=7):
         }
 
 
-def _startup_test(disable_plugins=False):
-    env = os.environ.copy()
-    cmd = [sys.executable, '-m', 'yt_dlp', '--version']
-    if disable_plugins:
-        env['YTDLP_NO_PLUGINS'] = '1'
-        cmd.append('--no-plugin-dirs')
-    started = time.monotonic()
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10, check=False, env=env)
-        return {
-            'ok': proc.returncode == 0,
-            'seconds': round(time.monotonic() - started, 2),
-            'value': _clean_text(proc.stdout or proc.stderr, 80),
-        }
-    except Exception as exc:
-        return {'ok': False, 'seconds': round(time.monotonic() - started, 2), 'error': _clean_error(exc)}
-
-
 def _network_selftest():
     encoded = urllib.parse.quote(_KNOWN_URL, safe='')
     return {
-        'yt_dlp_startup_plugins': _startup_test(False),
-        'yt_dlp_startup_no_plugins': _startup_test(True),
         'youtube_watch': _timed_http(_KNOWN_URL),
         'youtube_oembed': _timed_http(f'https://www.youtube.com/oembed?url={encoded}&format=json'),
-        'googleapis_root': _timed_http('https://youtubei.googleapis.com/', timeout=7),
+        'studio_root': _timed_http('https://studio.youtube.com/', timeout=7),
+        'music_root': _timed_http('https://music.youtube.com/', timeout=7),
+        'mobile_root': _timed_http('https://m.youtube.com/', timeout=7),
+        'nocookie_root': _timed_http('https://www.youtube-nocookie.com/', timeout=7),
         'pot_provider': legacy.pot_provider_status(),
     }
 
@@ -235,7 +218,7 @@ def _network_selftest():
 legacy.base_opts = base_opts
 legacy.youtube_attempts = youtube_attempts
 legacy.extract_info_sync = extract_info_sync
-legacy.APP_VERSION = '1.15.5'
+legacy.APP_VERSION = '1.15.6'
 app.version = legacy.APP_VERSION
 
 
