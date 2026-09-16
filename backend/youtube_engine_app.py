@@ -1,6 +1,12 @@
+import asyncio
+import json
 import re
+import subprocess
+import sys
+import time
 from urllib.parse import urlparse
 
+from fastapi import HTTPException
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
@@ -11,28 +17,29 @@ legacy = base.legacy
 
 _ORIGINAL_BASE_OPTS = legacy.base_opts
 _ANSI = re.compile(r'\x1b\[[0-9;]*m')
+_SELFTEST_URL = 'https://www.youtube.com/watch?v=hLKiVtoD83k'
+
+
+def _clean_text(value, limit=420):
+    text = _ANSI.sub('', str(value or '')).replace('\n', ' ').replace('\r', ' ').strip()
+    if len(text) > limit:
+        text = text[-limit:]
+    return text
 
 
 def _clean_error(exc):
-    text = _ANSI.sub('', str(exc)).replace('\n', ' ').replace('\r', ' ').strip()
-    if len(text) > 420:
-        text = text[-420:]
-    return f'{type(exc).__name__}: {text or "no message"}'
+    return f'{type(exc).__name__}: {_clean_text(exc) or "no message"}'
 
 
 def youtube_attempts():
     """Current YouTube fallbacks: mweb+PO first, cookie only when needed."""
     attempts = [
-        # yt-dlp's current PO-token guide recommends mweb + a PO provider.
         {'name': 'mweb-pot-public', 'clients': ['mweb'], 'cookie': False},
-        # `default` lets the current nightly pick its preferred public clients.
         {'name': 'default-public', 'clients': ['default'], 'cookie': False},
         {'name': 'embedded-public', 'clients': ['web_embedded'], 'cookie': False},
         {'name': 'android-vr-public', 'clients': ['android_vr'], 'cookie': False, 'selector': 'best/18'},
     ]
     if legacy.youtube_cookie_ready():
-        # Recent yt-dlp guidance recommends default+web_embedded when cookies
-        # are required; keep Safari as a last authenticated fallback.
         attempts.extend([
             {'name': 'default-embedded-cookie', 'clients': ['default', 'web_embedded'], 'cookie': True},
             {'name': 'safari-cookie', 'clients': ['web_safari'], 'cookie': True},
@@ -43,8 +50,6 @@ def youtube_attempts():
 def base_opts(url=None, clients=None, use_cookie=True):
     clients = clients or ['mweb']
     opts = _ORIGINAL_BASE_OPTS(url, clients, use_cookie)
-    # A blocked YouTube client must not hold the UI for tens of seconds before
-    # trying the next route.
     opts['socket_timeout'] = 8
     opts['retries'] = 0
     opts['fragment_retries'] = 1
@@ -64,11 +69,7 @@ def extract_info_sync(url):
 
     for strategy in attempts:
         try:
-            opts = base_opts(
-                url,
-                strategy.get('clients'),
-                strategy.get('cookie', False),
-            )
+            opts = base_opts(url, strategy.get('clients'), strategy.get('cookie', False))
             opts['skip_download'] = True
             with YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False, process=False)
@@ -76,33 +77,103 @@ def extract_info_sync(url):
                 if info.get('entries'):
                     info = next((item for item in info['entries'] if item), info)
                 legacy.cache_put(url, info, strategy)
-                print(
-                    'youtube info ok '
-                    f'host={urlparse(url).hostname} strategy={strategy["name"]}',
-                    flush=True,
-                )
+                print(f'youtube info ok host={urlparse(url).hostname} strategy={strategy["name"]}', flush=True)
                 return info
         except Exception as exc:
             detail = _clean_error(exc)
             errors.append(f'{strategy["name"]}={detail}')
             print(
-                'youtube attempt failed '
-                f'host={urlparse(url).hostname} strategy={strategy["name"]} error={detail}',
+                f'youtube attempt failed host={urlparse(url).hostname} '
+                f'strategy={strategy["name"]} error={detail}',
                 flush=True,
             )
 
     joined = ' | '.join(errors)
-    print(
-        f'media info failed host={urlparse(url).hostname} details={joined}',
-        flush=True,
-    )
+    print(f'media info failed host={urlparse(url).hostname} details={joined}', flush=True)
     raise DownloadError('media info failed')
+
+
+def _strategy_by_name(name):
+    return next((item for item in youtube_attempts() if item['name'] == name), None)
+
+
+def _cli_extract(strategy, url=_SELFTEST_URL, hard_timeout=12):
+    """Run one yt-dlp client in a killable subprocess for Render diagnostics."""
+    clients = ','.join(strategy.get('clients') or ['default'])
+    cmd = [
+        sys.executable, '-m', 'yt_dlp',
+        '--dump-single-json', '--skip-download', '--no-playlist',
+        '--quiet', '--no-warnings', '--no-config-locations',
+        '--socket-timeout', '7', '--retries', '0', '--extractor-retries', '0',
+        '--fragment-retries', '0', '--js-runtimes', 'node',
+        '--user-agent', legacy.YOUTUBE_UA,
+        '--extractor-args', f'youtube:player_client={clients}',
+        '--extractor-args', f'youtubepot-bgutilhttp:base_url={legacy.POT_URL}',
+    ]
+    if strategy.get('cookie'):
+        cookie = legacy.writable_cookie()
+        if cookie:
+            cmd.extend(['--cookies', str(cookie)])
+    cmd.append(url)
+
+    started = time.monotonic()
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=hard_timeout,
+            check=False,
+            env=None,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            'ok': False,
+            'timeout': True,
+            'seconds': round(time.monotonic() - started, 2),
+            'error': f'hard timeout after {hard_timeout}s',
+        }
+
+    seconds = round(time.monotonic() - started, 2)
+    if proc.returncode != 0:
+        return {
+            'ok': False,
+            'timeout': False,
+            'seconds': seconds,
+            'returncode': proc.returncode,
+            'error': _clean_text(proc.stderr or proc.stdout, 700) or 'yt-dlp failed without message',
+        }
+
+    try:
+        info = json.loads(proc.stdout)
+    except Exception as exc:
+        return {
+            'ok': False,
+            'timeout': False,
+            'seconds': seconds,
+            'error': f'json parse failed: {_clean_text(exc)}',
+        }
+
+    heights = sorted({
+        int(item.get('height') or 0)
+        for item in (info.get('formats') or [])
+        if isinstance(item, dict) and item.get('height')
+    })
+    return {
+        'ok': True,
+        'timeout': False,
+        'seconds': seconds,
+        'title': info.get('title'),
+        'id': info.get('id'),
+        'formats': len(info.get('formats') or []),
+        'max_height': max(heights, default=0),
+    }
 
 
 legacy.base_opts = base_opts
 legacy.youtube_attempts = youtube_attempts
 legacy.extract_info_sync = extract_info_sync
-legacy.APP_VERSION = '1.15.1'
+legacy.APP_VERSION = '1.15.2'
 app.version = legacy.APP_VERSION
 
 
@@ -115,3 +186,12 @@ async def youtube_engine_status():
         'pot_provider': legacy.pot_provider_status(),
         'attempts': [item['name'] for item in youtube_attempts()],
     }
+
+
+@app.get('/api/youtube/selftest/{strategy_name}')
+async def youtube_strategy_selftest(strategy_name: str):
+    strategy = _strategy_by_name(strategy_name)
+    if not strategy:
+        raise HTTPException(404, 'Unknown YouTube strategy')
+    result = await asyncio.to_thread(_cli_extract, strategy)
+    return {'strategy': strategy_name, **result}
