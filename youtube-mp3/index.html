@@ -10,7 +10,7 @@
   <script defer src="../assets/common.js?v=20260916"></script>
   <script defer src="../assets/ambient.js?v=1"></script>
   <script defer src="../assets/router.js?v=3"></script>
-  <script defer src="../assets/mp3.js?v=3"></script>
+  <script defer src="../assets/mp3.js?v=4"></script>
 </head>
 <body data-platform="youtube-mp3">
   <div class="shell">
@@ -21,7 +21,7 @@
         <div class="downloader-head">
           <span class="eyebrow"><i class="eyebrow-dot"></i>YOUTUBE AUDIO</span>
           <h1>YouTube MP3 Downloader</h1>
-          <p id="page-sub">Tempel link YouTube, lalu pilih audio cepat atau MP3.</p>
+          <p id="page-sub">Tempel link YouTube, lalu pilih audio cepat atau MP3. MP3 diproses langsung di perangkat lu.</p>
         </div>
 
         <div class="download-card">
@@ -38,10 +38,10 @@
               <div id="media-meta" class="media-meta"></div>
               <div class="media-actions">
                 <select id="audio-mode" class="audio-mode" aria-label="Format audio">
-                  <option value="fast" selected>Audio cepat · tanpa convert</option>
-                  <option value="mp3">MP3 · 192 kbps</option>
+                  <option value="fast">Audio cepat · tanpa convert</option>
+                  <option value="mp3" selected>MP3 · 192 kbps · lokal</option>
                 </select>
-                <button id="download-btn" class="btn primary" type="button" disabled>Download Audio</button>
+                <button id="download-btn" class="btn primary" type="button" disabled>Download MP3</button>
               </div>
             </div>
           </div>
