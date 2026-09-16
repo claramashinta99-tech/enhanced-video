@@ -1,5 +1,5 @@
 (()=>{
-  const ROUTES=new Set(['/','/clarity/','/tiktok-downloader/','/youtube-downloader/','/youtube-mp3/']);
+  const ROUTES=new Set(['/','/clarity/','/tiktok-downloader/','/youtube-downloader/','/youtube-shorts/','/youtube-mp3/']);
   let navigating=false;
   function routePath(url){const u=new URL(url,location.href);let p=u.pathname;if(!p.endsWith('/')&&!p.split('/').pop().includes('.'))p+='/';return p}
   function isInternalRoute(url){const u=new URL(url,location.href);return u.origin===location.origin&&ROUTES.has(routePath(u))}
@@ -13,6 +13,7 @@
     if(path==='/'){ensureHomeCss();src=`/assets/home.js?route=${Date.now()}`}
     else if(path==='/clarity/'){src=`/assets/clarity.js?route=${Date.now()}`;type='module'}
     else if(path==='/tiktok-downloader/'||path==='/youtube-downloader/'){src=`/assets/downloader.js?route=${Date.now()}`}
+    else if(path==='/youtube-shorts/'){src=`/assets/shorts.js?route=${Date.now()}`}
     else if(path==='/youtube-mp3/'){src=`/assets/mp3.js?route=${Date.now()}`}
     if(!src)return;const s=document.createElement('script');s.dataset.rvlRouteScript='1';s.src=src;if(type)s.type=type;document.body.appendChild(s)
   }
