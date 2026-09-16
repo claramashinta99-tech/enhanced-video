@@ -51,51 +51,43 @@ jobs:
           test -n "$TOKEN"
           echo "$TOKEN" >/tmp/token
           curl -sS -L --max-time 60 -o /tmp/rvlbench/input.m4a -w 'tunnel http=%{http_code} ttfb=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} speed_Bps=%{speed_download}\n' "$API/api/audio/chunked/$TOKEN"
-          ls -lh /tmp/rvlbench/input.m4a
           test $(stat -c%s /tmp/rvlbench/input.m4a) -gt 9000000
 
-      - name: Benchmark Mediabunny LAME SIMD in headless Chrome
+      - name: Benchmark production CDN engine in Chrome
         shell: bash
         run: |
           set -euo pipefail
           cd /tmp/rvlbench
           npm init -y >/dev/null 2>&1
-          npm install --silent mediabunny @mediabunny/mp3-encoder esbuild playwright-core
-          cat > app.js <<'JS'
-          import {
-            Input, ALL_FORMATS, BlobSource, Output, BufferTarget,
-            Mp3OutputFormat, canEncodeAudio, Conversion
-          } from 'mediabunny';
-          import { registerMp3Encoder } from '@mediabunny/mp3-encoder';
+          npm install --silent playwright-core
+          cat > index.html <<'HTML'
+          <!doctype html><meta charset="utf-8"><title>RVL CDN bench</title><body><script type="module">
           const done=(obj)=>{const s=JSON.stringify(obj);document.body.dataset.done='1';document.body.dataset.result=s;console.log('RVLBENCH '+s)};
           try {
             const t0=performance.now();
-            if (!(await canEncodeAudio('mp3'))) registerMp3Encoder();
-            const tRegister=performance.now();
+            const mb=await import('https://esm.sh/mediabunny@1.56.3');
+            const ext=await import('https://esm.sh/@mediabunny/mp3-encoder@1.56.3');
+            const tImport=performance.now();
+            if (!(await mb.canEncodeAudio('mp3'))) ext.registerMp3Encoder();
             const r=await fetch('/input.m4a');
             const sourceBlob=await r.blob();
-            const file=new File([sourceBlob], 'input.m4a', {type: sourceBlob.type || 'audio/mp4'});
+            const file=new File([sourceBlob],'input.m4a',{type:sourceBlob.type||'audio/mp4'});
             const tFetch=performance.now();
-            const input=new Input({source:new BlobSource(file), formats:ALL_FORMATS});
-            const target=new BufferTarget();
-            const output=new Output({format:new Mp3OutputFormat(), target});
-            const conversion=await Conversion.init({input, output, audio:{bitrate:192000}});
+            const input=new mb.Input({source:new mb.BlobSource(file),formats:mb.ALL_FORMATS});
+            const target=new mb.BufferTarget();
+            const output=new mb.Output({format:new mb.Mp3OutputFormat(),target});
+            const conversion=await mb.Conversion.init({input,output,audio:{bitrate:192000}});
             const tInit=performance.now();
             await conversion.execute();
             const tDone=performance.now();
-            const buffer=target.buffer;
-            done({ok:!!buffer,inputBytes:file.size,outputBytes:buffer?.byteLength||0,registerMs:Math.round(tRegister-t0),fetchMs:Math.round(tFetch-tRegister),initMs:Math.round(tInit-tFetch),encodeMs:Math.round(tDone-tInit),totalMs:Math.round(tDone-t0)});
+            done({ok:!!target.buffer,inputBytes:file.size,outputBytes:target.buffer?.byteLength||0,importMs:Math.round(tImport-t0),fetchMs:Math.round(tFetch-tImport),initMs:Math.round(tInit-tFetch),encodeMs:Math.round(tDone-tInit),totalMs:Math.round(tDone-t0)});
           } catch(e) {done({error:String(e),stack:e?.stack||''});}
-          JS
-          npx esbuild app.js --bundle --format=esm --platform=browser --target=chrome120 --outfile=bundle.js
-          cat > index.html <<'HTML'
-          <!doctype html><meta charset="utf-8"><title>RVL Mediabunny bench</title><body><script type="module" src="/bundle.js"></script></body>
+          </script></body>
           HTML
           python3 -m http.server 8765 --bind 127.0.0.1 >/tmp/http.log 2>&1 &
           SERVER_PID=$!
           trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
           CHROME=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)
-          echo "chrome=$CHROME"
           test -n "$CHROME"
           cat > run.mjs <<'JS'
           import { chromium } from 'playwright-core';
@@ -108,7 +100,7 @@ jobs:
           const result=await page.getAttribute('body','data-result');
           console.log('RESULT '+result);
           const parsed=JSON.parse(result);
-          if (parsed.error || !parsed.ok || parsed.outputBytes < 10000000) process.exitCode=1;
+          if(parsed.error||!parsed.ok||parsed.outputBytes<10000000)process.exitCode=1;
           await browser.close();
           JS
           CHROME="$CHROME" timeout 300 node run.mjs
