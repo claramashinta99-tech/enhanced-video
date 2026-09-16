@@ -29,13 +29,10 @@ jobs:
           print(json.dumps({'url': os.environ['VIDEO_URL']}))
           PY
           )
-          curl -sS --max-time 45 -o /tmp/info.json \
-            -w 'info http=%{http_code} ttfb=%{time_starttransfer}s total=%{time_total}s\n' \
-            -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/mp3/info"
+          curl -sS --max-time 45 -o /tmp/info.json -w 'info http=%{http_code} ttfb=%{time_starttransfer}s total=%{time_total}s\n' -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/mp3/info"
           cat /tmp/info.json; echo
           for i in 1 2 3; do
-            CODE=$(curl -sS --max-time 35 -o /tmp/prepare.json -w '%{http_code}' \
-              -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/audio/prepare" || true)
+            CODE=$(curl -sS --max-time 35 -o /tmp/prepare.json -w '%{http_code}' -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/audio/prepare" || true)
             echo "prepare[$i] http=$CODE $(cat /tmp/prepare.json)"
             TOKEN=$(python - <<'PY'
           import json
@@ -54,20 +51,22 @@ jobs:
           set -euo pipefail
           TOKEN=$(cat /tmp/token)
           mkdir -p /tmp/rvlbench
-          curl -sS -L --max-time 60 -o /tmp/rvlbench/input.m4a \
-            -w 'tunnel http=%{http_code} ttfb=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} speed_Bps=%{speed_download}\n' \
-            "$API/api/audio/chunked/$TOKEN"
+          curl -sS -L --max-time 60 -o /tmp/rvlbench/input.m4a -w 'tunnel http=%{http_code} ttfb=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} speed_Bps=%{speed_download}\n' "$API/api/audio/chunked/$TOKEN"
           ls -lh /tmp/rvlbench/input.m4a
           test $(stat -c%s /tmp/rvlbench/input.m4a) -gt 9000000
+
+      - name: Install FFmpeg
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
 
       - name: Benchmark native FFmpeg on normal CPU
         shell: bash
         run: |
           set -euo pipefail
           ffmpeg -version | head -1
-          /usr/bin/time -f 'native_ffmpeg elapsed=%e sec cpu=%P maxrss=%M KB' \
-            ffmpeg -hide_banner -loglevel error -y -i /tmp/rvlbench/input.m4a \
-            -vn -c:a libmp3lame -b:a 192k -compression_level 0 /tmp/rvlbench/native.mp3
+          /usr/bin/time -f 'native_ffmpeg elapsed=%e sec cpu=%P maxrss=%M KB' ffmpeg -hide_banner -loglevel error -y -i /tmp/rvlbench/input.m4a -vn -c:a libmp3lame -b:a 192k -compression_level 0 /tmp/rvlbench/native.mp3
           ls -lh /tmp/rvlbench/native.mp3
           ffprobe -v error -show_entries format=duration,size -of default=nw=1 /tmp/rvlbench/native.mp3
 
@@ -78,8 +77,7 @@ jobs:
           set -euo pipefail
           cd /tmp/rvlbench
           cat > index.html <<'HTML'
-          <!doctype html><meta charset="utf-8"><title>RVL WASM bench</title>
-          <pre id="out">starting</pre>
+          <!doctype html><meta charset="utf-8"><title>RVL WASM bench</title><pre id="out">starting</pre>
           <script type="module">
           const out=document.querySelector('#out');
           const log=(x)=>{out.textContent+='\n'+x;console.log('RVLBENCH '+x)};
@@ -88,11 +86,7 @@ jobs:
             const {FFmpeg}=await import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js');
             const toBlobURL=async(url,type)=>URL.createObjectURL(new Blob([await (await fetch(url)).arrayBuffer()],{type}));
             const ffmpeg=new FFmpeg();
-            await ffmpeg.load({
-              coreURL:await toBlobURL('https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js','text/javascript'),
-              wasmURL:await toBlobURL('https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm','application/wasm'),
-              workerURL:await toBlobURL('https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.worker.js','text/javascript')
-            });
+            await ffmpeg.load({coreURL:await toBlobURL('https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js','text/javascript'),wasmURL:await toBlobURL('https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm','application/wasm'),workerURL:await toBlobURL('https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.worker.js','text/javascript')});
             const tLoad=performance.now();
             const input=new Uint8Array(await (await fetch('/input.m4a')).arrayBuffer());
             const tFetch=performance.now();
@@ -101,19 +95,17 @@ jobs:
             const rc=await ffmpeg.exec(['-i','input.m4a','-vn','-c:a','libmp3lame','-b:a','192k','-compression_level','0','output.mp3']);
             const tExec1=performance.now();
             const data=await ffmpeg.readFile('output.mp3');
-            log(JSON.stringify({ok:rc===0,inputBytes:input.byteLength,outputBytes:data.byteLength,loadMs:Math.round(tLoad-t0),fetchMs:Math.round(tFetch-tLoad),execMs:Math.round(tExec1-tExec0),totalMs:Math.round(tExec1-t0)}));
-            document.body.dataset.done='1';document.body.dataset.result=JSON.stringify({rc,inputBytes:input.byteLength,outputBytes:data.byteLength,execMs:Math.round(tExec1-tExec0),totalMs:Math.round(tExec1-t0)});
+            const result={rc,inputBytes:input.byteLength,outputBytes:data.byteLength,loadMs:Math.round(tLoad-t0),fetchMs:Math.round(tFetch-tLoad),execMs:Math.round(tExec1-tExec0),totalMs:Math.round(tExec1-t0)};
+            log(JSON.stringify(result));document.body.dataset.done='1';document.body.dataset.result=JSON.stringify(result);
           }catch(e){log('ERROR '+(e?.stack||e));document.body.dataset.done='1';document.body.dataset.result=JSON.stringify({error:String(e)});}
           </script>
           HTML
-          python3 -m http.server 8765 --bind 127.0.0.1 >/tmp/http.log 2>&1 &
-          SERVER_PID=$!
+          python3 -m http.server 8765 --bind 127.0.0.1 >/tmp/http.log 2>&1 & SERVER_PID=$!
           trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
           npm --prefix /tmp/rvlbench init -y >/dev/null 2>&1
           npm --prefix /tmp/rvlbench install playwright-core@latest --silent
           CHROME=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)
-          echo "chrome=$CHROME"
-          test -n "$CHROME"
+          echo "chrome=$CHROME"; test -n "$CHROME"
           cat > /tmp/rvlbench/run.mjs <<'JS'
           import { chromium } from 'playwright-core';
           const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME,args:['--no-sandbox']});
@@ -133,7 +125,5 @@ jobs:
           set -u
           TOKEN=$(cat /tmp/token)
           curl -sS --max-time 20 "$API/api/audio/debug/$TOKEN"; echo
-          curl -sS -L --max-time 30 -o /dev/null \
-            -w 'raw_cross_ip http=%{http_code} redirects=%{num_redirects} ttfb=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} speed_Bps=%{speed_download}\n' \
-            "$API/api/audio/direct/$TOKEN"
+          curl -sS -L --max-time 30 -o /dev/null -w 'raw_cross_ip http=%{http_code} redirects=%{num_redirects} ttfb=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} speed_Bps=%{speed_download}\n' "$API/api/audio/direct/$TOKEN"
           echo "raw_exit=$?"
