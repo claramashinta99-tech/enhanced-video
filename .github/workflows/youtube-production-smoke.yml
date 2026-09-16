@@ -8,29 +8,46 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
       API: https://rvl-api.onrender.com
     steps:
-      - name: Wait for backend v1.15.3
+      - name: Wait for backend v1.15.4
         shell: bash
         run: |
           set -euo pipefail
-          for i in $(seq 1 36); do
+          for i in $(seq 1 42); do
             BODY=$(curl -fsS --max-time 25 "$API/health" || true)
             echo "$BODY"
-            if echo "$BODY" | grep -q '"version":"1.15.3"'; then exit 0; fi
+            if echo "$BODY" | grep -q '"version":"1.15.4"'; then exit 0; fi
             sleep 10
           done
           exit 1
-      - name: Probe network layer
+      - name: Test Shorts extraction strategies
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS --max-time 30 "$API/api/youtube/nettest" | tee /tmp/nettest.json
-          echo
+          curl -fsS --max-time 30 "$API/api/youtube/nettest"; echo
+          names=(visionos-noplugin-skip visionos-noplugin default-noplugin-skip android-vr-noplugin-skip mweb-pot-skip)
+          : > /tmp/results.txt
+          for name in "${names[@]}"; do
+            echo "=== $name ==="
+            curl -sS --max-time 35 "$API/api/youtube/selftest/$name" | tee "/tmp/$name.json"
+            echo
+            cat "/tmp/$name.json" >> /tmp/results.txt
+            echo >> /tmp/results.txt
+            sleep 1
+          done
           python - <<'PY'
-          import json
-          x=json.load(open('/tmp/nettest.json'))
-          print('NETTEST', x)
+          import json, pathlib
+          names=['visionos-noplugin-skip','visionos-noplugin','default-noplugin-skip','android-vr-noplugin-skip','mweb-pot-skip']
+          rows=[]
+          for name in names:
+              p=pathlib.Path('/tmp')/f'{name}.json'
+              try: rows.append(json.loads(p.read_text()))
+              except Exception: pass
+          print('RESULTS', [(x.get('strategy'),x.get('ok'),x.get('seconds'),x.get('formats'),x.get('max_height'),x.get('error')) for x in rows])
+          ok=[x for x in rows if x.get('ok')]
+          if not ok:
+              raise SystemExit('No production extraction strategy succeeded')
           PY
