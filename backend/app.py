@@ -13,7 +13,7 @@ from starlette.background import BackgroundTask
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
-app = FastAPI(title="RVL Media API", version="1.0.0")
+app = FastAPI(title="RVL Media API", version="1.1.0")
 
 origins = [x.strip() for x in os.getenv(
     "WEB_ORIGINS",
@@ -60,11 +60,19 @@ def base_opts() -> dict:
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "socket_timeout": 20,
-        "retries": 2,
-        "fragment_retries": 2,
+        "socket_timeout": 25,
+        "retries": 3,
+        "fragment_retries": 3,
         "max_filesize": MAX_FILESIZE,
         "restrictfilenames": False,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["mweb"],
+            },
+            "youtubepot-bgutilhttp": {
+                "base_url": ["http://127.0.0.1:4416"],
+            },
+        },
     }
 
 
@@ -122,7 +130,7 @@ def cleanup(path: str) -> None:
 
 @app.get("/")
 async def root():
-    return {"name": "RVL Media API", "status": "ok"}
+    return {"name": "RVL Media API", "status": "ok", "version": "1.1.0"}
 
 
 @app.get("/health")
@@ -136,8 +144,10 @@ async def media_info(body: URLBody):
     try:
         info = await asyncio.to_thread(extract_info_sync, url)
     except DownloadError as exc:
+        print(f"yt-dlp info error for {url}: {exc}", flush=True)
         raise HTTPException(status_code=422, detail="Media tidak bisa dibaca. Coba link lain.") from exc
     except Exception as exc:
+        print(f"info error for {url}: {type(exc).__name__}: {exc}", flush=True)
         raise HTTPException(status_code=500, detail="Gagal membaca media.") from exc
 
     host = (urlparse(url).hostname or "").lower()
@@ -170,9 +180,11 @@ async def download_media(body: DownloadBody, request: Request):
         async with DOWNLOAD_SLOTS:
             path = await asyncio.to_thread(download_sync, url, quality, workdir)
     except DownloadError as exc:
+        print(f"yt-dlp download error for {url}: {exc}", flush=True)
         cleanup(workdir)
         raise HTTPException(status_code=422, detail="Download gagal. Video mungkin private, dibatasi, atau butuh login.") from exc
     except Exception as exc:
+        print(f"download error for {url}: {type(exc).__name__}: {exc}", flush=True)
         cleanup(workdir)
         raise HTTPException(status_code=500, detail="Gagal menyiapkan file.") from exc
 
