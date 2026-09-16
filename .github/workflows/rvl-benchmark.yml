@@ -8,7 +8,7 @@ on:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     env:
       VIDEO_URL: 'https://www.youtube.com/watch?v=9_0Dk2B2zmA'
       API: 'https://rvl-api.onrender.com'
@@ -20,7 +20,7 @@ jobs:
           curl -fsS --max-time 20 "$API/health" | tee /tmp/health.json
           grep -q '"version":"1.13.1"' /tmp/health.json
 
-      - name: Prepare one audio token with retries
+      - name: Prepare audio token
         shell: bash
         run: |
           set -euo pipefail
@@ -29,103 +29,111 @@ jobs:
           print(json.dumps({'url': os.environ['VIDEO_URL']}))
           PY
           )
-          echo '--- info ---'
           curl -sS --max-time 45 -o /tmp/info.json \
             -w 'info http=%{http_code} ttfb=%{time_starttransfer}s total=%{time_total}s\n' \
             -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/mp3/info"
           cat /tmp/info.json; echo
-
-          : > /tmp/prepare.json
           for i in 1 2 3; do
-            echo "--- prepare attempt $i ---"
-            CODE=$(curl -sS --max-time 35 -o /tmp/prepare.json \
-              -w '%{http_code}' -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/audio/prepare" || true)
-            echo "http=$CODE body=$(cat /tmp/prepare.json)"
+            CODE=$(curl -sS --max-time 35 -o /tmp/prepare.json -w '%{http_code}' \
+              -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/audio/prepare" || true)
+            echo "prepare[$i] http=$CODE $(cat /tmp/prepare.json)"
             TOKEN=$(python - <<'PY'
           import json
           try: print(json.load(open('/tmp/prepare.json')).get('token',''))
           except: print('')
           PY
             )
-            if [ -n "$TOKEN" ]; then echo "$TOKEN" > /tmp/token; exit 0; fi
-            sleep 4
-            curl -sS --max-time 45 -o /dev/null -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/mp3/info" || true
+            if [ -n "$TOKEN" ]; then echo "$TOKEN" >/tmp/token; exit 0; fi
+            sleep 3
           done
-          echo 'prepare never returned token' >&2
           exit 1
 
-      - name: Inspect token and compare direct CDN vs Render proxy
+      - name: Download source through same-IP Render tunnel
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(cat /tmp/token)
+          mkdir -p /tmp/rvlbench
+          curl -sS -L --max-time 60 -o /tmp/rvlbench/input.m4a \
+            -w 'tunnel http=%{http_code} ttfb=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} speed_Bps=%{speed_download}\n' \
+            "$API/api/audio/chunked/$TOKEN"
+          ls -lh /tmp/rvlbench/input.m4a
+          test $(stat -c%s /tmp/rvlbench/input.m4a) -gt 9000000
+
+      - name: Benchmark native FFmpeg on normal CPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          ffmpeg -version | head -1
+          /usr/bin/time -f 'native_ffmpeg elapsed=%e sec cpu=%P maxrss=%M KB' \
+            ffmpeg -hide_banner -loglevel error -y -i /tmp/rvlbench/input.m4a \
+            -vn -c:a libmp3lame -b:a 192k -compression_level 0 /tmp/rvlbench/native.mp3
+          ls -lh /tmp/rvlbench/native.mp3
+          ffprobe -v error -show_entries format=duration,size -of default=nw=1 /tmp/rvlbench/native.mp3
+
+      - name: Benchmark FFmpeg WASM in headless Chrome
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/rvlbench
+          cat > index.html <<'HTML'
+          <!doctype html><meta charset="utf-8"><title>RVL WASM bench</title>
+          <pre id="out">starting</pre>
+          <script type="module">
+          const out=document.querySelector('#out');
+          const log=(x)=>{out.textContent+='\n'+x;console.log('RVLBENCH '+x)};
+          try{
+            const t0=performance.now();
+            const {FFmpeg}=await import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js');
+            const toBlobURL=async(url,type)=>URL.createObjectURL(new Blob([await (await fetch(url)).arrayBuffer()],{type}));
+            const ffmpeg=new FFmpeg();
+            await ffmpeg.load({
+              coreURL:await toBlobURL('https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js','text/javascript'),
+              wasmURL:await toBlobURL('https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm','application/wasm'),
+              workerURL:await toBlobURL('https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.worker.js','text/javascript')
+            });
+            const tLoad=performance.now();
+            const input=new Uint8Array(await (await fetch('/input.m4a')).arrayBuffer());
+            const tFetch=performance.now();
+            await ffmpeg.writeFile('input.m4a',input);
+            const tExec0=performance.now();
+            const rc=await ffmpeg.exec(['-i','input.m4a','-vn','-c:a','libmp3lame','-b:a','192k','-compression_level','0','output.mp3']);
+            const tExec1=performance.now();
+            const data=await ffmpeg.readFile('output.mp3');
+            log(JSON.stringify({ok:rc===0,inputBytes:input.byteLength,outputBytes:data.byteLength,loadMs:Math.round(tLoad-t0),fetchMs:Math.round(tFetch-tLoad),execMs:Math.round(tExec1-tExec0),totalMs:Math.round(tExec1-t0)}));
+            document.body.dataset.done='1';document.body.dataset.result=JSON.stringify({rc,inputBytes:input.byteLength,outputBytes:data.byteLength,execMs:Math.round(tExec1-tExec0),totalMs:Math.round(tExec1-t0)});
+          }catch(e){log('ERROR '+(e?.stack||e));document.body.dataset.done='1';document.body.dataset.result=JSON.stringify({error:String(e)});}
+          </script>
+          HTML
+          python3 -m http.server 8765 --bind 127.0.0.1 >/tmp/http.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          npm --prefix /tmp/rvlbench init -y >/dev/null 2>&1
+          npm --prefix /tmp/rvlbench install playwright-core@latest --silent
+          CHROME=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)
+          echo "chrome=$CHROME"
+          test -n "$CHROME"
+          cat > /tmp/rvlbench/run.mjs <<'JS'
+          import { chromium } from 'playwright-core';
+          const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME,args:['--no-sandbox']});
+          const page=await browser.newPage();
+          page.on('console',m=>console.log(m.text()));
+          await page.goto('http://127.0.0.1:8765',{waitUntil:'load'});
+          await page.waitForFunction(()=>document.body.dataset.done==='1',null,{timeout:240000});
+          console.log('RESULT '+await page.getAttribute('body','data-result'));
+          await browser.close();
+          JS
+          CHROME="$CHROME" timeout 300 node /tmp/rvlbench/run.mjs
+
+      - name: Cross-IP raw GoogleVideo diagnostic
         continue-on-error: true
         shell: bash
         run: |
           set -u
           TOKEN=$(cat /tmp/token)
-          echo '--- source debug ---'
           curl -sS --max-time 20 "$API/api/audio/debug/$TOKEN"; echo
-
-          echo '--- DIRECT CDN (cross-IP test) ---'
-          curl -sS -L --max-time 90 -o /dev/null \
-            -w 'direct http=%{http_code} redirects=%{num_redirects} ttfb=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} speed_Bps=%{speed_download}\n' \
+          curl -sS -L --max-time 30 -o /dev/null \
+            -w 'raw_cross_ip http=%{http_code} redirects=%{num_redirects} ttfb=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} speed_Bps=%{speed_download}\n' \
             "$API/api/audio/direct/$TOKEN"
-          echo "direct_exit=$?"
-
-          echo '--- Render proxy first 1 MiB ---'
-          curl -sS -L --max-time 90 -H 'Range: bytes=0-1048575' -o /dev/null \
-            -w 'proxy1m http=%{http_code} ttfb=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} speed_Bps=%{speed_download}\n' \
-            "$API/api/audio/chunked/$TOKEN"
-          echo "proxy1m_exit=$?"
-
-          echo '--- Render proxy full file ---'
-          curl -sS -L --max-time 90 -o /dev/null \
-            -w 'proxyfull http=%{http_code} ttfb=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} speed_Bps=%{speed_download}\n' \
-            "$API/api/audio/chunked/$TOKEN"
-          echo "proxyfull_exit=$?"
-
-      - name: Compare direct yt-dlp on fresh machine
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -u
-          python -m pip install -q -U 'yt-dlp[default,curl-cffi]'
-          yt-dlp --version
-          echo '--- yt-dlp metadata ---'
-          /usr/bin/time -f 'metadata elapsed=%e sec' timeout 90 yt-dlp --no-warnings --skip-download --print '%(title)s | %(duration)s sec' "$VIDEO_URL"
-          echo "metadata_exit=$?"
-          echo '--- yt-dlp native audio download, 4 MiB chunks ---'
-          rm -f /tmp/rvl-direct.*
-          /usr/bin/time -f 'direct-download elapsed=%e sec' timeout 180 yt-dlp --no-warnings --http-chunk-size 4M -f 'bestaudio[ext=m4a]/bestaudio' -o '/tmp/rvl-direct.%(ext)s' "$VIDEO_URL"
-          echo "ytdlp_download_exit=$?"
-          ls -lh /tmp/rvl-direct.* 2>/dev/null || true
-
-      - name: Benchmark MP3 conversion for at most 120 seconds
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -u
-          PAYLOAD=$(python - <<'PY'
-          import json, os
-          print(json.dumps({'url': os.environ['VIDEO_URL'], 'quality':'audio'}))
-          PY
-          )
-          START=$(date +%s)
-          curl -sS --max-time 45 -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/mp3/jobs" -o /tmp/job.json
-          cat /tmp/job.json; echo
-          JOB=$(python - <<'PY'
-          import json
-          try: print(json.load(open('/tmp/job.json')).get('job_id',''))
-          except: print('')
-          PY
-          )
-          test -n "$JOB" || exit 0
-          for i in $(seq 1 60); do
-            BODY=$(curl -sS --max-time 20 "$API/api/jobs/$JOB" || true)
-            NOW=$(date +%s)
-            echo "t=$((NOW-START))s $BODY"
-            STATE=$(python -c 'import sys,json; x=sys.stdin.read();
-          try: print(json.loads(x).get("state",""))
-          except: print("")' <<<"$BODY")
-            [ "$STATE" = ready ] && exit 0
-            [ "$STATE" = error ] && exit 0
-            sleep 2
-          done
-          echo 'MP3 still not ready after ~120 sec'
+          echo "raw_exit=$?"
