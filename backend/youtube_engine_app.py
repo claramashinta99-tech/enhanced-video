@@ -21,31 +21,34 @@ def _clean_error(exc):
 
 
 def youtube_attempts():
-    """Use current yt-dlp clients first, with cookie and public fallbacks."""
-    public = [
-        {'name': 'visionos-web-public', 'clients': ['visionos', 'web'], 'cookie': False},
-        {'name': 'tv-public', 'clients': ['tv', 'tv_downgraded'], 'cookie': False},
+    """Current YouTube fallbacks: mweb+PO first, cookie only when needed."""
+    attempts = [
+        # yt-dlp's current PO-token guide recommends mweb + a PO provider.
+        {'name': 'mweb-pot-public', 'clients': ['mweb'], 'cookie': False},
+        # `default` lets the current nightly pick its preferred public clients.
+        {'name': 'default-public', 'clients': ['default'], 'cookie': False},
         {'name': 'embedded-public', 'clients': ['web_embedded'], 'cookie': False},
         {'name': 'android-vr-public', 'clients': ['android_vr'], 'cookie': False, 'selector': 'best/18'},
     ]
     if legacy.youtube_cookie_ready():
-        return [
-            {'name': 'web-cookie', 'clients': ['web'], 'cookie': True},
-            {'name': 'mweb-cookie', 'clients': ['mweb'], 'cookie': True},
-            *public,
-        ]
-    return public
+        # Recent yt-dlp guidance recommends default+web_embedded when cookies
+        # are required; keep Safari as a last authenticated fallback.
+        attempts.extend([
+            {'name': 'default-embedded-cookie', 'clients': ['default', 'web_embedded'], 'cookie': True},
+            {'name': 'safari-cookie', 'clients': ['web_safari'], 'cookie': True},
+        ])
+    return attempts
 
 
 def base_opts(url=None, clients=None, use_cookie=True):
-    clients = clients or ['visionos', 'web']
+    clients = clients or ['mweb']
     opts = _ORIGINAL_BASE_OPTS(url, clients, use_cookie)
-    # Fail over quickly when a YouTube client is blocked instead of making the
-    # user wait through long retries on the same broken route.
-    opts['socket_timeout'] = 12
-    opts['retries'] = 1
+    # A blocked YouTube client must not hold the UI for tens of seconds before
+    # trying the next route.
+    opts['socket_timeout'] = 8
+    opts['retries'] = 0
     opts['fragment_retries'] = 1
-    opts['extractor_retries'] = 1
+    opts['extractor_retries'] = 0
     return opts
 
 
@@ -96,13 +99,10 @@ def extract_info_sync(url):
     raise DownloadError('media info failed')
 
 
-# app.py handlers resolve these globals at request time, so patching the legacy
-# module upgrades both ordinary YouTube videos and the dedicated Shorts route
-# without duplicating the downloader implementation.
 legacy.base_opts = base_opts
 legacy.youtube_attempts = youtube_attempts
 legacy.extract_info_sync = extract_info_sync
-legacy.APP_VERSION = '1.15.0'
+legacy.APP_VERSION = '1.15.1'
 app.version = legacy.APP_VERSION
 
 
