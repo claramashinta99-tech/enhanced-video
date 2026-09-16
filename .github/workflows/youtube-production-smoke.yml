@@ -8,42 +8,75 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
-    env:
-      SHORT_ID: sJtC8WP9nSI
+    timeout-minutes: 7
     steps:
-      - name: Check screenshot Short directly from GitHub egress
-        shell: bash
-        run: |
-          set -u
-          WATCH="https://www.youtube.com/watch?v=$SHORT_ID"
-          OEMBED="https://www.youtube.com/oembed?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D$SHORT_ID&format=json"
-          echo '=== oEmbed ==='
-          curl -sS -L --max-time 20 -D /tmp/oembed.headers -o /tmp/oembed.body -w 'http=%{http_code} total=%{time_total}\n' "$OEMBED" || true
-          cat /tmp/oembed.headers || true
-          head -c 2000 /tmp/oembed.body || true; echo
-          echo '=== watch page ==='
-          curl -sS -L --max-time 20 -A 'Mozilla/5.0' -D /tmp/watch.headers -o /tmp/watch.body -w 'http=%{http_code} total=%{time_total}\n' "$WATCH" || true
-          head -n 15 /tmp/watch.headers || true
-          echo "watch_bytes=$(wc -c < /tmp/watch.body 2>/dev/null || echo 0)"
-
-      - name: Run current yt-dlp on screenshot Short from GitHub egress
+      - name: Discover a live public Short
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install -q 'yt-dlp[default] @ https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/2026.08.30.232658/yt-dlp.tar.gz'
-          START=$(date +%s)
-          set +e
-          timeout 45s python -m yt_dlp --no-config-locations --no-playlist --skip-download --dump-single-json --no-warnings "https://www.youtube.com/watch?v=$SHORT_ID" >/tmp/info.json 2>/tmp/err.txt
-          CODE=$?
-          set -e
-          echo "exit=$CODE seconds=$(($(date +%s)-START))"
-          cat /tmp/err.txt || true
-          if [ -s /tmp/info.json ]; then
-            python - <<'PY'
-          import json
-          x=json.load(open('/tmp/info.json'))
-          print('ID',x.get('id'),'TITLE',x.get('title'),'FORMATS',len(x.get('formats') or []))
-          print('MAX_HEIGHT',max([int(f.get('height') or 0) for f in (x.get('formats') or [])] or [0]))
+          curl -fsSL --max-time 25 -A 'Mozilla/5.0' 'https://www.youtube.com/@YouTube/shorts' -o /tmp/shorts.html
+          python - <<'PY' > /tmp/candidates.txt
+          import re
+          text=open('/tmp/shorts.html',encoding='utf-8',errors='ignore').read()
+          ids=[]
+          for pat in [r'"videoId":"([A-Za-z0-9_-]{11})"', r'/shorts/([A-Za-z0-9_-]{11})']:
+              for v in re.findall(pat,text):
+                  if v not in ids: ids.append(v)
+          print('\n'.join(ids[:40]))
           PY
-          fi
+          echo "candidates=$(wc -l < /tmp/candidates.txt)"
+          cat /tmp/candidates.txt | head -20
+          : > /tmp/live_id
+          while read -r id; do
+            [ -z "$id" ] && continue
+            code=$(curl -sS -L --max-time 10 -o /tmp/oembed -w '%{http_code}' "https://www.youtube.com/oembed?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3D${id}&format=json" || true)
+            echo "$id oembed=$code"
+            if [ "$code" = 200 ]; then echo -n "$id" > /tmp/live_id; break; fi
+          done < /tmp/candidates.txt
+          ID=$(cat /tmp/live_id)
+          test -n "$ID"
+          echo "LIVE_SHORT_ID=$ID" >> "$GITHUB_ENV"
+          echo "Selected live Short: $ID"
+
+      - name: Test Piped stream providers
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Testing $LIVE_SHORT_ID"
+          providers=('https://pipedapi.ducks.party' 'https://api.piped.private.coffee')
+          : > /tmp/good_provider
+          for base in "${providers[@]}"; do
+            echo "=== $base ==="
+            code=$(curl -sS -L --max-time 30 -o /tmp/piped.json -w '%{http_code}' "$base/streams/$LIVE_SHORT_ID" || true)
+            echo "http=$code bytes=$(wc -c < /tmp/piped.json 2>/dev/null || echo 0)"
+            if [ "$code" = 200 ]; then
+              python - "$base" <<'PY'
+          import json,sys
+          base=sys.argv[1]
+          x=json.load(open('/tmp/piped.json'))
+          vs=x.get('videoStreams') or []
+          aud=x.get('audioStreams') or []
+          print('title=',x.get('title'))
+          print('videoStreams=',len(vs),'audioStreams=',len(aud))
+          print('video_sample=',[(v.get('quality'),v.get('format'),v.get('videoOnly'),bool(v.get('url'))) for v in vs[:12]])
+          print('audio_sample=',[(a.get('quality'),a.get('format'),bool(a.get('url'))) for a in aud[:5]])
+          ok=[v for v in vs if v.get('url')]
+          if not ok: raise SystemExit(3)
+          open('/tmp/good_provider','w').write(base)
+          open('/tmp/stream_url','w').write(ok[0]['url'])
+          PY
+              if [ -s /tmp/good_provider ]; then break; fi
+            fi
+          done
+          test -s /tmp/good_provider
+          echo "GOOD_PROVIDER=$(cat /tmp/good_provider)"
+
+      - name: Fetch bytes through returned media URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL=$(cat /tmp/stream_url)
+          code=$(curl -sS -L --max-time 30 -r 0-262143 -o /tmp/sample.bin -w '%{http_code}' "$URL" || true)
+          bytes=$(wc -c < /tmp/sample.bin 2>/dev/null || echo 0)
+          echo "stream_http=$code stream_bytes=$bytes"
+          test "$bytes" -gt 10000
