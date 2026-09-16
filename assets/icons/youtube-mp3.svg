@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="YouTube MP3">
+  <g fill="#101426" shape-rendering="crispEdges">
+    <rect x="17" y="5" width="3" height="14"/><rect x="20" y="5" width="7" height="3"/><rect x="20" y="8" width="4" height="3"/>
+    <rect x="10" y="16" width="7" height="3"/><rect x="7" y="19" width="10" height="6"/><rect x="10" y="25" width="4" height="2"/>
+    <rect x="20" y="15" width="7" height="3"/><rect x="20" y="18" width="4" height="6"/>
+  </g>
+  <g fill="#77e8c1" shape-rendering="crispEdges">
+    <rect x="9" y="20" width="6" height="3"/><rect x="21" y="19" width="2" height="3"/>
+  </g>
+</svg>
