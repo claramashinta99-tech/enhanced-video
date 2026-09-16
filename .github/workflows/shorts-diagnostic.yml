@@ -24,7 +24,7 @@ jobs:
           set -euo pipefail
           for key in SHORTS WATCH; do
             URL="${!key}"
-            PAYLOAD=$(python -c 'import json,os; print(json.dumps({"url":os.environ["URL"]}))' URL="$URL")
+            PAYLOAD=$(URL="$URL" python -c 'import json,os; print(json.dumps({"url":os.environ["URL"]}))')
             echo "=== $key ==="
             curl -sS --max-time 45 -o "/tmp/${key}.json" -w 'http=%{http_code} total=%{time_total}s\n' -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/info"
             cat "/tmp/${key}.json"; echo
