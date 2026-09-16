@@ -1,5 +1,7 @@
 (()=>{
   const RVL_API='https://rvl-api.onrender.com';
+  const MEDIABUNNY_URL='https://esm.sh/mediabunny@1.56.3';
+  const MP3_ENCODER_URL='https://esm.sh/@mediabunny/mp3-encoder@1.56.3';
   const qs=s=>document.querySelector(s);
   const input=qs('#media-url');
   const inspectBtn=qs('#inspect-btn');
@@ -16,6 +18,9 @@
   let inspectRun=0;
   let inspectController=null;
   let downloadRun=0;
+  let enginePromise=null;
+  let preparedAudio=null;
+  let activeConversion=null;
 
   if(!document.querySelector('#rvl-mp3-style')){
     const css=document.createElement('style');
@@ -32,7 +37,7 @@
       .rvl-job-progress{display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
       .rvl-job-progress.show{display:block}.rvl-job-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;font-size:11px;color:#8d8d94}
       .rvl-job-head strong{color:#c9c9ce;font-weight:600}.rvl-job-track{height:7px;border-radius:999px;background:#1a1a1d;overflow:hidden;border:1px solid rgba(255,255,255,.04)}
-      .rvl-job-fill{height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,#63c8ff,#8b7cff);box-shadow:0 0 16px rgba(139,124,255,.18);transition:width .28s ease}
+      .rvl-job-fill{height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,#63c8ff,#8b7cff);box-shadow:0 0 16px rgba(139,124,255,.18);transition:width .22s ease}
       .rvl-job-progress.indeterminate .rvl-job-fill{width:42%!important;animation:rvlJobIndeterminate 1.05s ease-in-out infinite alternate}
       @keyframes rvlJobIndeterminate{from{transform:translateX(-40%)}to{transform:translateX(165%)}}
       @media(max-width:600px){.media-card.show{grid-template-columns:92px 1fr}.media-thumb{width:92px}.media-actions{grid-template-columns:1fr}.download-input-wrap{grid-template-columns:1fr}}
@@ -67,23 +72,61 @@
   }
   function hideProgress(){progressWrap.classList.remove('show','indeterminate');progressFill.style.width='0%';progressPct.textContent='0%'}
   function selectedFast(){return mode.value==='fast'}
+  function safeName(v){return String(v||'audio').replace(/[\\/:*?"<>|]/g,' ').replace(/\s+/g,' ').trim().slice(0,150)||'audio'}
+  function abortError(){const e=new Error('Canceled');e.name='AbortError';return e}
+  function cancelConversion(){const c=activeConversion;activeConversion=null;if(c)c.cancel().catch(()=>{})}
+
   function updateModeCopy(){
     if(!current)return;
     const bits=[];if(current.data.uploader)bits.push(current.data.uploader);
-    bits.push(selectedFast()?text('Audio cepat · tanpa convert','Fast audio · no conversion'):'MP3 · 192 kbps');
+    bits.push(selectedFast()?text('Audio cepat · tanpa convert','Fast audio · no conversion'):text('MP3 · 192 kbps · proses lokal','MP3 · 192 kbps · local processing'));
     if(metaEl)metaEl.textContent=bits.join(' · ');
     downloadBtn.textContent=selectedFast()?text('Download Audio','Download Audio'):'Download MP3';
   }
+
   function applyStaticCopy(){
     const en=lang()==='en';const sub=qs('#page-sub');
-    if(sub)sub.textContent=en?'Paste a YouTube link, then choose fast audio or MP3.':'Tempel link YouTube, lalu pilih audio cepat atau MP3.';
+    if(sub)sub.textContent=en?'Paste a YouTube link, then choose fast audio or MP3. MP3 is converted on your device.':'Tempel link YouTube, lalu pilih audio cepat atau MP3. MP3 diproses langsung di perangkat lu.';
     input.placeholder=en?'Paste YouTube link':'Tempel link YouTube';inspectBtn.textContent=en?'Check':'Cek';
     const fastOpt=mode.querySelector('option[value="fast"]');const mp3Opt=mode.querySelector('option[value="mp3"]');
     if(fastOpt)fastOpt.textContent=en?'Fast audio · no conversion':'Audio cepat · tanpa convert';
-    if(mp3Opt)mp3Opt.textContent='MP3 · 192 kbps';
+    if(mp3Opt)mp3Opt.textContent=en?'MP3 · 192 kbps · local':'MP3 · 192 kbps · lokal';
     if(!downloadBtn.disabled)updateModeCopy();
   }
-  function reset(){current=null;card.classList.remove('show');downloadBtn.disabled=true;thumb?.removeAttribute('src');if(titleEl)titleEl.textContent='';if(metaEl)metaEl.textContent='';hideProgress()}
+
+  function reset(){
+    current=null;preparedAudio=null;cancelConversion();card.classList.remove('show');downloadBtn.disabled=true;thumb?.removeAttribute('src');
+    if(titleEl)titleEl.textContent='';if(metaEl)metaEl.textContent='';hideProgress();
+  }
+
+  async function loadMp3Engine(){
+    if(enginePromise)return enginePromise;
+    enginePromise=Promise.all([import(MEDIABUNNY_URL),import(MP3_ENCODER_URL)])
+      .then(async([mb,ext])=>{if(!(await mb.canEncodeAudio('mp3')))ext.registerMp3Encoder();return mb})
+      .catch(err=>{enginePromise=null;throw err});
+    return enginePromise;
+  }
+
+  async function prepareAudio(url){
+    let lastErr=null;
+    for(let attempt=1;attempt<=3;attempt++){
+      try{
+        const r=await fetch(`${RVL_API}/api/audio/prepare`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url}),cache:'no-store'});
+        const data=await r.json().catch(()=>({}));
+        if(r.ok&&data.token)return data;
+        lastErr=new Error(data.detail||text('Audio gagal disiapkan.','Could not prepare audio.'));
+      }catch(e){lastErr=e}
+      if(attempt<3)await sleep(650*attempt);
+    }
+    throw lastErr||new Error(text('Audio gagal disiapkan.','Could not prepare audio.'));
+  }
+
+  function warmPrepare(url){
+    if(preparedAudio?.url===url)return preparedAudio.promise;
+    const promise=prepareAudio(url).catch(err=>{if(preparedAudio?.promise===promise)preparedAudio=null;throw err});
+    preparedAudio={url,promise};
+    return promise;
+  }
 
   async function inspect(){
     const url=input.value.trim();const run=++inspectRun;++downloadRun;
@@ -95,13 +138,14 @@
       const data=await r.json().catch(()=>({}));if(run!==inspectRun)return;if(!r.ok)throw new Error(data.detail||text('Link nggak bisa dibaca.','Could not read this link.'));
       current={url,data};if(thumb){thumb.src=data.thumbnail||'';thumb.alt=data.title||'Media thumbnail'}if(titleEl)titleEl.textContent=data.title||'Untitled';
       downloadBtn.disabled=false;card.classList.add('show');hideProgress();setStatus('');updateModeCopy();
+      warmPrepare(url).catch(()=>{});loadMp3Engine().catch(()=>{});
     }catch(e){if(e.name==='AbortError'||run!==inspectRun)return;console.error(e);reset();setStatus(e.message||text('Gagal mengecek link.','Failed to check link.'),'error')}
     finally{if(run===inspectRun){inspectBtn.disabled=false;input.disabled=false;inspectController=null}}
   }
 
   async function pollJob(jobId,run){
     while(run===downloadRun){
-      await sleep(600);
+      await sleep(650);
       const r=await fetch(`${RVL_API}/api/jobs/${encodeURIComponent(jobId)}?_=${Date.now()}`,{cache:'no-store'});
       const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;
       if(!r.ok)throw new Error(data.detail||text('Proses MP3 gagal.','MP3 process failed.'));
@@ -114,31 +158,86 @@
     }
   }
 
+  async function downloadMp3ServerFallback(run){
+    setProgress(3,text('Mode kompatibilitas server','Server compatibility mode'));
+    const r=await fetch(`${RVL_API}/api/mp3/jobs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url,quality:'audio'}),cache:'no-store'});
+    const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok||!data.job_id)throw new Error(data.detail||text('Gagal memulai MP3.','Could not start MP3 conversion.'));
+    await pollJob(data.job_id,run);
+  }
+
   async function downloadFast(run){
-    setProgress(18,text('Menyiapkan audio','Preparing audio'),{indeterminate:true});
-    const r=await fetch(`${RVL_API}/api/audio/prepare`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url}),cache:'no-store'});
-    const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;
-    if(!r.ok||!data.token)throw new Error(data.detail||text('Audio gagal disiapkan.','Could not prepare audio.'));
+    setProgress(12,text('Menyiapkan audio','Preparing audio'),{indeterminate:true});
+    const data=await warmPrepare(current.url);if(run!==downloadRun)return;
     setProgress(100,text('Download dimulai','Download started'));
     frame.src=`${RVL_API}/api/audio/chunked/${encodeURIComponent(data.token)}?_=${Date.now()}`;
     downloadBtn.disabled=false;updateModeCopy();setTimeout(()=>{if(run===downloadRun)hideProgress()},1600);
   }
 
+  async function fetchAudioBlob(token,run){
+    const r=await fetch(`${RVL_API}/api/audio/chunked/${encodeURIComponent(token)}?_=${Date.now()}`,{cache:'no-store',mode:'cors'});
+    if(!r.ok)throw new Error(text('Gagal mengambil audio sumber.','Failed to fetch source audio.'));
+    if(!r.body){const blob=await r.blob();if(run!==downloadRun)throw abortError();return blob}
+    const total=Number(r.headers.get('content-length'))||0;
+    const type=r.headers.get('content-type')||'audio/mp4';
+    const reader=r.body.getReader();const chunks=[];let received=0;
+    while(true){
+      if(run!==downloadRun){try{await reader.cancel()}catch{}throw abortError()}
+      const {done,value}=await reader.read();if(done)break;
+      chunks.push(value);received+=value.byteLength;
+      if(total)setProgress(12+(received/total)*34,text('Mengambil audio','Fetching audio'));
+      else setProgress(26,text('Mengambil audio','Fetching audio'),{indeterminate:true});
+    }
+    return new Blob(chunks,{type});
+  }
+
+  function saveMp3(blob){
+    const url=URL.createObjectURL(blob);const a=document.createElement('a');
+    a.href=url;a.download=`${safeName(current?.data?.title)}.mp3`;a.style.display='none';document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),30000);
+  }
+
+  async function downloadMp3Local(run){
+    setProgress(5,text('Menyiapkan audio','Preparing audio'),{indeterminate:true});
+    const [prepared,mb]=await Promise.all([warmPrepare(current.url),loadMp3Engine()]);
+    if(run!==downloadRun)return;
+    const sourceBlob=await fetchAudioBlob(prepared.token,run);if(run!==downloadRun)return;
+    setProgress(48,text('Convert MP3 di perangkat','Converting MP3 on device'));
+    const file=new File([sourceBlob],prepared.filename||'source.m4a',{type:sourceBlob.type||'audio/mp4'});
+    const mbInput=new mb.Input({source:new mb.BlobSource(file),formats:mb.ALL_FORMATS});
+    const target=new mb.BufferTarget();
+    const output=new mb.Output({format:new mb.Mp3OutputFormat(),target});
+    const conversion=await mb.Conversion.init({input:mbInput,output,audio:{bitrate:192000}});
+    if(!conversion.isValid)throw new Error(text('Browser ini nggak bisa convert audio tersebut.','This browser cannot convert this audio.'));
+    activeConversion=conversion;
+    conversion.onProgress=(p)=>{if(run===downloadRun)setProgress(48+Math.max(0,Math.min(1,p))*49,text('Convert MP3 di perangkat','Converting MP3 on device'))};
+    try{await conversion.execute()}finally{if(activeConversion===conversion)activeConversion=null}
+    if(run!==downloadRun)throw abortError();
+    if(!target.buffer)throw new Error(text('Hasil MP3 kosong.','MP3 output is empty.'));
+    const result=new Blob([target.buffer],{type:'audio/mpeg'});
+    setProgress(100,text('Selesai','Done'));saveMp3(result);setStatus(text('MP3 selesai · diproses di perangkat lu.','MP3 ready · processed on your device.'));
+    downloadBtn.disabled=false;updateModeCopy();setTimeout(()=>{if(run===downloadRun)hideProgress()},1800);
+  }
+
   async function downloadMp3(run){
-    setProgress(3,text('Menyiapkan MP3','Preparing MP3'));
-    const r=await fetch(`${RVL_API}/api/mp3/jobs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url,quality:'audio'}),cache:'no-store'});
-    const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok||!data.job_id)throw new Error(data.detail||text('Gagal memulai MP3.','Could not start MP3 conversion.'));
-    setProgress(data.progress||3,text('Mulai','Starting'));await pollJob(data.job_id,run);
+    try{await downloadMp3Local(run)}
+    catch(e){
+      if(run!==downloadRun||e?.name==='AbortError')return;
+      console.warn('Local MP3 path failed, using server fallback.',e);
+      setStatus(text('Mode lokal gagal, lanjut lewat server.','Local mode failed, continuing on server.'));
+      await downloadMp3ServerFallback(run);
+    }
   }
 
   async function download(){
-    if(!current)return;const run=++downloadRun;setStatus('');downloadBtn.disabled=true;downloadBtn.textContent=text('Proses…','Processing…');
+    if(!current)return;const run=++downloadRun;setStatus('');cancelConversion();downloadBtn.disabled=true;downloadBtn.textContent=text('Proses…','Processing…');
     try{
       if(selectedFast())await downloadFast(run);else await downloadMp3(run);
-    }catch(e){if(run!==downloadRun)return;console.error(e);hideProgress();setStatus(e.message||text('Download gagal.','Download failed.'),'error');downloadBtn.disabled=false;updateModeCopy()}
+    }catch(e){if(run!==downloadRun||e?.name==='AbortError')return;console.error(e);hideProgress();setStatus(e.message||text('Download gagal.','Download failed.'),'error');downloadBtn.disabled=false;updateModeCopy()}
   }
 
-  inspectBtn.addEventListener('click',inspect);downloadBtn.addEventListener('click',download);mode.addEventListener('change',()=>{++downloadRun;hideProgress();setStatus('');updateModeCopy()});input.addEventListener('keydown',e=>{if(e.key==='Enter')inspect()});
-  input.addEventListener('input',()=>{if(current&&input.value.trim()!==current.url){++inspectRun;++downloadRun;if(inspectController)inspectController.abort();reset();setStatus('')}});
+  inspectBtn.addEventListener('click',inspect);downloadBtn.addEventListener('click',download);
+  mode.addEventListener('change',()=>{++downloadRun;cancelConversion();hideProgress();setStatus('');updateModeCopy();if(!selectedFast())loadMp3Engine().catch(()=>{})});
+  input.addEventListener('keydown',e=>{if(e.key==='Enter')inspect()});
+  input.addEventListener('input',()=>{if(current&&input.value.trim()!==current.url){++inspectRun;++downloadRun;cancelConversion();if(inspectController)inspectController.abort();reset();setStatus('')}});
   window.addEventListener('reyval:lang',applyStaticCopy);applyStaticCopy();
 })();
