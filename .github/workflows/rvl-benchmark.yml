@@ -1,12 +1,6 @@
 name: RVL downloader benchmark
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/rvl-benchmark.yml'
-      - 'backend/**'
-      - 'assets/mp3.js'
   workflow_dispatch:
 
 jobs:
