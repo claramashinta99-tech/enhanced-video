@@ -17,7 +17,7 @@
 .home-quick-head{position:relative;display:flex;align-items:center;justify-content:space-between;padding:11px 12px 15px;color:#77777f;font-size:10px;letter-spacing:.12em;text-transform:uppercase}
 .home-quick-head span:last-child{color:#80dcb2;letter-spacing:.08em}
 .home-quick-list{position:relative;display:grid;gap:7px}
-.home-quick-row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:13px;min-height:78px;padding:13px;border:1px solid rgba(255,255,255,.07);border-radius:17px;background:#101012;transition:transform .17s ease,border-color .17s ease,background .17s ease}
+.home-quick-row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:13px;min-height:72px;padding:12px 13px;border:1px solid rgba(255,255,255,.07);border-radius:17px;background:#101012;transition:transform .17s ease,border-color .17s ease,background .17s ease}
 .home-quick-row:hover{transform:translateY(-1px);border-color:rgba(139,124,255,.27);background:#141416}
 .home-quick-icon{width:42px;height:42px;border:1px solid rgba(255,255,255,.09);border-radius:13px;background:#18181b;display:grid;place-items:center;color:#d7d5e1;font-size:16px}
 .home-quick-copy{min-width:0}
@@ -31,19 +31,20 @@
 .home-section-head h2{margin:7px 0 0;font-size:clamp(30px,3.4vw,42px);letter-spacing:-.05em;line-height:1.05}
 .home-section-head p{margin:0;color:#88888f;font-size:14px;line-height:1.6;text-align:right}
 
-.home-tool-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}
-.home-tool-card{position:relative;min-height:292px;padding:22px;border:1px solid rgba(255,255,255,.085);border-radius:22px;background:#101012;display:flex;flex-direction:column;overflow:hidden;transition:transform .18s ease,border-color .18s ease,background .18s ease,box-shadow .18s ease}
+.home-tool-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+.home-tool-card{position:relative;min-height:270px;padding:22px;border:1px solid rgba(255,255,255,.085);border-radius:22px;background:#101012;display:flex;flex-direction:column;overflow:hidden;transition:transform .18s ease,border-color .18s ease,background .18s ease,box-shadow .18s ease}
 .home-tool-card:before{content:"";position:absolute;width:190px;height:190px;border-radius:50%;top:-125px;right:-105px;background:rgba(139,124,255,.07);filter:blur(4px);pointer-events:none}
 .home-tool-card:hover{transform:translateY(-3px);border-color:rgba(139,124,255,.3);background:#131316;box-shadow:0 20px 48px rgba(0,0,0,.22)}
 .home-tool-card:nth-child(2):before{background:rgba(88,200,255,.055)}
 .home-tool-card:nth-child(3):before{background:rgba(255,126,182,.05)}
+.home-tool-card:nth-child(4):before{background:rgba(114,230,179,.05)}
 .home-tool-card-top{position:relative;display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
 .home-tool-number{font-size:11px;color:#65656c;letter-spacing:.12em}
 .home-tool-status{display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(104,230,194,.2);border-radius:999px;padding:6px 8px;color:#a8e6ca;background:rgba(104,230,194,.045);font-size:9px;letter-spacing:.07em}
 .home-tool-status:before{content:"";width:5px;height:5px;border-radius:50%;background:#68e6c2}
 .home-tool-symbol{position:relative;width:48px;height:48px;margin-top:31px;border:1px solid rgba(255,255,255,.09);border-radius:15px;background:#17171a;display:grid;place-items:center;color:#d7d5e1;font-size:19px}
 .home-tool-card h3{position:relative;margin:18px 0 7px;font-size:22px;letter-spacing:-.035em}
-.home-tool-card p{position:relative;max-width:30ch;margin:0;color:#8e8e95;font-size:13px;line-height:1.55}
+.home-tool-card p{position:relative;max-width:38ch;margin:0;color:#8e8e95;font-size:13px;line-height:1.55}
 .home-tool-open{position:relative;margin-top:auto;padding-top:24px;display:flex;align-items:center;justify-content:space-between;color:#c8c7cc;font-size:12px}
 .home-tool-open b{font-weight:600}
 .home-tool-open span:last-child{font-size:17px;color:#74747c;transition:transform .18s ease,color .18s ease}
@@ -73,7 +74,7 @@
   .home-actions .btn{width:100%}
   .home-quick{border-radius:20px}
   .home-quick-head{padding:9px 9px 13px}
-  .home-quick-row{min-height:72px;padding:11px}
+  .home-quick-row{min-height:68px;padding:10px 11px}
   .home-section-head{grid-template-columns:1fr;gap:12px;padding-top:28px}
   .home-section-head p{text-align:left}
   .home-tools{padding-bottom:58px}
