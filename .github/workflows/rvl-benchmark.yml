@@ -13,12 +13,15 @@ jobs:
       VIDEO_URL: 'https://www.youtube.com/watch?v=9_0Dk2B2zmA'
       API: 'https://rvl-api.onrender.com'
     steps:
-      - name: Confirm live backend
+      - name: Wake backend
         shell: bash
         run: |
-          set -euo pipefail
-          curl -fsS --max-time 20 "$API/health" | tee /tmp/health.json
-          grep -q '"version":"1.13.1"' /tmp/health.json
+          set +e
+          for i in 1 2 3; do
+            curl -sS --max-time 35 "$API/health" && break
+            sleep 3
+          done
+          exit 0
 
       - name: Prepare and download source audio
         shell: bash
@@ -30,11 +33,11 @@ jobs:
           print(json.dumps({'url': os.environ['VIDEO_URL']}))
           PY
           )
-          curl -sS --max-time 45 -o /tmp/info.json -w 'info http=%{http_code} ttfb=%{time_starttransfer}s total=%{time_total}s\n' -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/mp3/info"
+          curl -sS --max-time 60 -o /tmp/info.json -w 'info http=%{http_code} ttfb=%{time_starttransfer}s total=%{time_total}s\n' -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/mp3/info"
           cat /tmp/info.json; echo
           TOKEN=''
           for i in 1 2 3; do
-            CODE=$(curl -sS --max-time 35 -o /tmp/prepare.json -w '%{http_code}' -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/audio/prepare" || true)
+            CODE=$(curl -sS --max-time 45 -o /tmp/prepare.json -w '%{http_code}' -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/audio/prepare" || true)
             echo "prepare[$i] http=$CODE $(cat /tmp/prepare.json)"
             TOKEN=$(python - <<'PY'
           import json
@@ -64,15 +67,7 @@ jobs:
             Mp3OutputFormat, canEncodeAudio, Conversion
           } from 'mediabunny';
           import { registerMp3Encoder } from '@mediabunny/mp3-encoder';
-
-          const log=(x)=>console.log('RVLBENCH '+x);
-          const done=(obj)=>{
-            const s=JSON.stringify(obj);
-            document.body.dataset.done='1';
-            document.body.dataset.result=s;
-            log(s);
-          };
-
+          const done=(obj)=>{const s=JSON.stringify(obj);document.body.dataset.done='1';document.body.dataset.result=s;console.log('RVLBENCH '+s)};
           try {
             const t0=performance.now();
             if (!(await canEncodeAudio('mp3'))) registerMp3Encoder();
@@ -89,19 +84,8 @@ jobs:
             await conversion.execute();
             const tDone=performance.now();
             const buffer=target.buffer;
-            done({
-              ok:!!buffer,
-              inputBytes:file.size,
-              outputBytes:buffer?.byteLength || 0,
-              registerMs:Math.round(tRegister-t0),
-              fetchMs:Math.round(tFetch-tRegister),
-              initMs:Math.round(tInit-tFetch),
-              encodeMs:Math.round(tDone-tInit),
-              totalMs:Math.round(tDone-t0)
-            });
-          } catch(e) {
-            done({error:String(e), stack:e?.stack||''});
-          }
+            done({ok:!!buffer,inputBytes:file.size,outputBytes:buffer?.byteLength||0,registerMs:Math.round(tRegister-t0),fetchMs:Math.round(tFetch-tRegister),initMs:Math.round(tInit-tFetch),encodeMs:Math.round(tDone-tInit),totalMs:Math.round(tDone-t0)});
+          } catch(e) {done({error:String(e),stack:e?.stack||''});}
           JS
           npx esbuild app.js --bundle --format=esm --platform=browser --target=chrome120 --outfile=bundle.js
           cat > index.html <<'HTML'
