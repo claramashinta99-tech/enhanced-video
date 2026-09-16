@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: rvl-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: WEB_ORIGINS
+        value: https://reyval.web.id,https://www.reyval.web.id
+      - key: MAX_CONCURRENT_DOWNLOADS
+        value: "2"
