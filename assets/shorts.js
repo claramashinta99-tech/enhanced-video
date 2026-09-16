@@ -1,5 +1,5 @@
 (()=>{
-  const RVL_API='https://rvl-api.onrender.com';
+  const RVL_API='https://enhanced-video-production.up.railway.app';
   const qs=s=>document.querySelector(s);
   const input=qs('#media-url'),inspectBtn=qs('#inspect-btn'),card=qs('#media-card'),statusEl=qs('#download-status');
   const thumb=qs('#media-thumb'),titleEl=qs('#media-title'),metaEl=qs('#media-meta'),quality=qs('#quality'),downloadBtn=qs('#download-btn');
