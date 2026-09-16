@@ -1,0 +1,88 @@
+name: RVL Railway Shorts smoke
+
+on:
+  push:
+    branches: [youtube-engine-nightly-v1]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      API: https://enhanced-video-production.up.railway.app
+      SHORT_URL: https://www.youtube.com/shorts/Xh7I5J8eDQY
+    steps:
+      - name: Health
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 30 "$API/health" | tee /tmp/health.json
+          echo
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/health.json'))
+          print('HEALTH', x)
+          assert x.get('ok') is True
+          PY
+
+      - name: Read Short metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          START=$(date +%s)
+          curl -fsS --max-time 45 -H 'Content-Type: application/json' \
+            -d "{\"url\":\"$SHORT_URL\"}" "$API/api/info" | tee /tmp/info.json
+          echo
+          echo "info_seconds=$(($(date +%s)-START))"
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/info.json'))
+          print('INFO', {k:x.get(k) for k in ['platform','id','title','duration','max_height','choices']})
+          assert x.get('id') == 'Xh7I5J8eDQY'
+          assert x.get('choices')
+          PY
+
+      - name: Create download job
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 30 -H 'Content-Type: application/json' \
+            -d "{\"url\":\"$SHORT_URL\",\"quality\":\"best\"}" "$API/api/jobs" | tee /tmp/job.json
+          echo
+          python - <<'PY' >> "$GITHUB_ENV"
+          import json
+          x=json.load(open('/tmp/job.json'))
+          print('JOB_ID='+x['job_id'])
+          PY
+
+      - name: Wait until ready
+        shell: bash
+        run: |
+          set -euo pipefail
+          START=$(date +%s)
+          for i in $(seq 1 60); do
+            BODY=$(curl -fsS --max-time 20 "$API/api/jobs/$JOB_ID")
+            echo "$BODY"
+            STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
+            if [ "$STATE" = ready ]; then
+              echo "download_ready_seconds=$(($(date +%s)-START))"
+              exit 0
+            fi
+            if [ "$STATE" = error ]; then
+              echo "$BODY" >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          echo 'job timed out' >&2
+          exit 1
+
+      - name: Fetch output bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -L --max-time 60 -r 0-524287 -o /tmp/short.bin -w '%{http_code}' "$API/api/jobs/$JOB_ID/file")
+          bytes=$(wc -c < /tmp/short.bin)
+          echo "file_http=$code bytes=$bytes"
+          test "$bytes" -gt 10000
