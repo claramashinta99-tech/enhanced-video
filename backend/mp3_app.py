@@ -12,16 +12,22 @@ from pathlib import Path
 
 import app as legacy
 from fastapi import HTTPException
+from fastapi.responses import StreamingResponse
 from yt_dlp.utils import DownloadError
 
 app = legacy.app
-legacy.APP_VERSION = '1.11.0'
+legacy.APP_VERSION = '1.12.0'
 app.version = legacy.APP_VERSION
 
 MP3_SOURCE_TTL = 600
 MP3_PREP_WAIT = 18
+AUDIO_TOKEN_TTL = 180
+AUDIO_STREAM_CONCURRENCY = 4
 _mp3_source_lock = threading.Lock()
 _mp3_sources = {}
+_audio_token_lock = threading.Lock()
+_audio_tokens = {}
+_audio_stream_slots = threading.BoundedSemaphore(AUDIO_STREAM_CONCURRENCY)
 
 
 def youtube_id(url):
@@ -147,7 +153,7 @@ def _prepare_audio_source_sync(url):
             if not source or not source.get('url'):
                 raise RuntimeError('audio source URL missing')
             elapsed = int((time.monotonic() - started) * 1000)
-            print(f'mp3 source ready strategy={strategy.get("name")} ms={elapsed}', flush=True)
+            print(f'audio source ready strategy={strategy.get("name")} ms={elapsed}', flush=True)
             return {
                 'source': source,
                 'title': (info or {}).get('title') or 'YouTube audio',
@@ -156,8 +162,8 @@ def _prepare_audio_source_sync(url):
             }
         except Exception as exc:
             errors.append(f"{strategy.get('name')}:{type(exc).__name__}")
-    print(f"mp3 source prepare failed attempts={','.join(errors)}", flush=True)
-    raise DownloadError('mp3 source prepare failed')
+    print(f"audio source prepare failed attempts={','.join(errors)}", flush=True)
+    raise DownloadError('audio source prepare failed')
 
 
 def _source_worker(url, state):
@@ -193,7 +199,7 @@ def _wait_source(url):
         return state['source']
     if state.get('error'):
         raise state['error']
-    raise DownloadError('mp3 source prepare timeout')
+    raise DownloadError('audio source prepare timeout')
 
 
 def _safe_title(value):
@@ -202,9 +208,14 @@ def _safe_title(value):
     return (value[:90] or 'YouTube audio')
 
 
-def _ffmpeg_headers(source):
+def _source_headers(source):
     headers = dict(source.get('http_headers') or {})
     headers.setdefault('User-Agent', legacy.YOUTUBE_UA)
+    return {str(k): str(v) for k, v in headers.items() if v is not None and str(k).lower() not in {'host', 'content-length'}}
+
+
+def _ffmpeg_headers(source):
+    headers = _source_headers(source)
     args = []
     ua = headers.pop('User-Agent', headers.pop('user-agent', legacy.YOUTUBE_UA))
     if ua:
@@ -214,9 +225,6 @@ def _ffmpeg_headers(source):
         args += ['-referer', str(referer)]
     lines = []
     for key, value in headers.items():
-        if value is None or str(key).lower() in {'host', 'content-length'}:
-            continue
-        value = str(value)
         if '\r' in value or '\n' in value:
             continue
         lines.append(f'{key}: {value}')
@@ -287,6 +295,53 @@ def fast_mp3_sync(url, workdir, job_id=None):
         return legacy.download_sync(url, 'audio', workdir, job_id)
 
 
+def _purge_audio_tokens():
+    cutoff = time.time() - AUDIO_TOKEN_TTL
+    with _audio_token_lock:
+        for token, data in list(_audio_tokens.items()):
+            if data.get('created', 0) < cutoff:
+                _audio_tokens.pop(token, None)
+
+
+def _audio_ext(source):
+    ext = str(source.get('ext') or '').lower().strip('.')
+    if ext in {'m4a', 'mp4', 'webm', 'opus', 'ogg'}:
+        return ext
+    mime = str(source.get('audio_ext') or '').lower().strip('.')
+    if mime in {'m4a', 'mp4', 'webm', 'opus', 'ogg'}:
+        return mime
+    return 'm4a'
+
+
+def _audio_media_type(ext):
+    return {
+        'm4a': 'audio/mp4',
+        'mp4': 'audio/mp4',
+        'webm': 'audio/webm',
+        'opus': 'audio/ogg',
+        'ogg': 'audio/ogg',
+    }.get(ext, 'application/octet-stream')
+
+
+def _open_audio_source(source):
+    req = urllib.request.Request(source['url'], headers=_source_headers(source))
+    return urllib.request.urlopen(req, timeout=25)
+
+
+def _audio_iter(response):
+    try:
+        while True:
+            chunk = response.read(1024 * 1024)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        try:
+            response.close()
+        finally:
+            _audio_stream_slots.release()
+
+
 async def run_mp3_job(job_id, url):
     with legacy._jobs_lock:
         job = legacy._jobs.get(job_id)
@@ -320,7 +375,60 @@ async def mp3_info(body: legacy.URLBody):
         'format': 'MP3',
         'bitrate': 192,
         'audio_prepare': 'background',
+        'fast_audio': True,
     }
+
+
+@app.post('/api/audio/prepare')
+async def prepare_fast_audio(body: legacy.URLBody):
+    _purge_audio_tokens()
+    url = legacy.validate_url(body.url)
+    if not legacy.is_youtube(url):
+        raise HTTPException(400, 'Link harus dari YouTube.')
+    try:
+        source_data = await asyncio.to_thread(_wait_source, url)
+    except Exception as exc:
+        raise HTTPException(422, legacy.youtube_error(exc)) from exc
+    source = source_data['source']
+    ext = _audio_ext(source)
+    title = _safe_title(source_data.get('title'))
+    token = uuid.uuid4().hex
+    with _audio_token_lock:
+        _audio_tokens[token] = {
+            'created': time.time(),
+            'source': source,
+            'filename': f'{title}.{ext}',
+            'media_type': _audio_media_type(ext),
+        }
+    return {'token': token, 'filename': f'{title}.{ext}', 'format': ext.upper(), 'direct': True}
+
+
+@app.get('/api/audio/stream/{token}')
+async def stream_fast_audio(token: str):
+    _purge_audio_tokens()
+    with _audio_token_lock:
+        item = _audio_tokens.pop(token, None)
+    if not item:
+        raise HTTPException(404, 'Link audio sudah kedaluwarsa. Klik Download lagi.')
+
+    await asyncio.to_thread(_audio_stream_slots.acquire)
+    try:
+        response = await asyncio.to_thread(_open_audio_source, item['source'])
+    except Exception as exc:
+        _audio_stream_slots.release()
+        raise HTTPException(502, 'Audio gagal dimulai. Coba Download lagi.') from exc
+
+    filename_ascii = re.sub(r'[^A-Za-z0-9._ -]+', '_', item['filename'])[:120] or 'audio.m4a'
+    encoded = urllib.parse.quote(item['filename'])
+    headers = {
+        'Content-Disposition': f'attachment; filename="{filename_ascii}"; filename*=UTF-8\'\'{encoded}',
+        'Cache-Control': 'no-store',
+        'X-Accel-Buffering': 'no',
+    }
+    length = response.headers.get('Content-Length')
+    if length:
+        headers['Content-Length'] = length
+    return StreamingResponse(_audio_iter(response), media_type=item['media_type'], headers=headers)
 
 
 @app.post('/api/mp3/jobs')
