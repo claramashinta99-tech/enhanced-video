@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 import subprocess
 import sys
@@ -19,8 +20,8 @@ legacy = base.legacy
 
 _ORIGINAL_BASE_OPTS = legacy.base_opts
 _ANSI = re.compile(r'\x1b\[[0-9;]*m')
-_SELFTEST_URL = 'https://www.youtube.com/watch?v=hLKiVtoD83k'
-_KNOWN_URL = 'https://www.youtube.com/watch?v=9_0Dk2B2zmA'
+_SELFTEST_URL = 'https://www.youtube.com/watch?v=sJtC8WP9nSI'
+_KNOWN_URL = _SELFTEST_URL
 
 
 def _clean_text(value, limit=420):
@@ -47,6 +48,15 @@ def youtube_attempts():
             {'name': 'safari-cookie', 'clients': ['web_safari'], 'cookie': True},
         ])
     return attempts
+
+
+SELFTEST_STRATEGIES = [
+    {'name': 'visionos-noplugin-skip', 'clients': ['visionos'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs']},
+    {'name': 'visionos-noplugin', 'clients': ['visionos'], 'cookie': False, 'disable_plugins': True},
+    {'name': 'default-noplugin-skip', 'clients': ['default'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs']},
+    {'name': 'android-vr-noplugin-skip', 'clients': ['android_vr'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs']},
+    {'name': 'mweb-pot-skip', 'clients': ['mweb'], 'cookie': False, 'player_skip': ['webpage', 'configs']},
+]
 
 
 def base_opts(url=None, clients=None, use_cookie=True):
@@ -96,30 +106,41 @@ def extract_info_sync(url):
 
 
 def _strategy_by_name(name):
-    return next((item for item in youtube_attempts() if item['name'] == name), None)
+    all_strategies = [*SELFTEST_STRATEGIES, *youtube_attempts()]
+    return next((item for item in all_strategies if item['name'] == name), None)
 
 
-def _cli_extract(strategy, url=_SELFTEST_URL, hard_timeout=12):
+def _cli_extract(strategy, url=_SELFTEST_URL, hard_timeout=24):
     clients = ','.join(strategy.get('clients') or ['default'])
+    youtube_args = [f'player_client={clients}']
+    if strategy.get('player_skip'):
+        youtube_args.append('player_skip=' + ','.join(strategy['player_skip']))
     cmd = [
         sys.executable, '-m', 'yt_dlp',
         '--dump-single-json', '--skip-download', '--no-playlist',
         '--quiet', '--no-warnings', '--no-config-locations',
-        '--socket-timeout', '7', '--retries', '0', '--extractor-retries', '0',
+        '--socket-timeout', '8', '--retries', '0', '--extractor-retries', '0',
         '--fragment-retries', '0', '--js-runtimes', 'node',
         '--user-agent', legacy.YOUTUBE_UA,
-        '--extractor-args', f'youtube:player_client={clients}',
-        '--extractor-args', f'youtubepot-bgutilhttp:base_url={legacy.POT_URL}',
+        '--extractor-args', 'youtube:' + ';'.join(youtube_args),
     ]
+    if strategy.get('disable_plugins'):
+        cmd.append('--no-plugin-dirs')
+    else:
+        cmd.extend(['--extractor-args', f'youtubepot-bgutilhttp:base_url={legacy.POT_URL}'])
     if strategy.get('cookie'):
         cookie = legacy.writable_cookie()
         if cookie:
             cmd.extend(['--cookies', str(cookie)])
     cmd.append(url)
 
+    env = os.environ.copy()
+    if strategy.get('disable_plugins'):
+        env['YTDLP_NO_PLUGINS'] = '1'
+
     started = time.monotonic()
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=hard_timeout, check=False)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=hard_timeout, check=False, env=env)
     except subprocess.TimeoutExpired:
         return {
             'ok': False,
@@ -135,7 +156,7 @@ def _cli_extract(strategy, url=_SELFTEST_URL, hard_timeout=12):
             'timeout': False,
             'seconds': seconds,
             'returncode': proc.returncode,
-            'error': _clean_text(proc.stderr or proc.stdout, 700) or 'yt-dlp failed without message',
+            'error': _clean_text(proc.stderr or proc.stdout, 1000) or 'yt-dlp failed without message',
         }
 
     try:
@@ -179,27 +200,29 @@ def _timed_http(url, timeout=7):
         }
 
 
-def _network_selftest():
+def _startup_test(disable_plugins=False):
+    env = os.environ.copy()
+    cmd = [sys.executable, '-m', 'yt_dlp', '--version']
+    if disable_plugins:
+        env['YTDLP_NO_PLUGINS'] = '1'
+        cmd.append('--no-plugin-dirs')
     started = time.monotonic()
     try:
-        proc = subprocess.run(
-            [sys.executable, '-m', 'yt_dlp', '--version'],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-        startup = {
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10, check=False, env=env)
+        return {
             'ok': proc.returncode == 0,
             'seconds': round(time.monotonic() - started, 2),
             'value': _clean_text(proc.stdout or proc.stderr, 80),
         }
     except Exception as exc:
-        startup = {'ok': False, 'seconds': round(time.monotonic() - started, 2), 'error': _clean_error(exc)}
+        return {'ok': False, 'seconds': round(time.monotonic() - started, 2), 'error': _clean_error(exc)}
 
+
+def _network_selftest():
     encoded = urllib.parse.quote(_KNOWN_URL, safe='')
     return {
-        'yt_dlp_startup': startup,
+        'yt_dlp_startup_plugins': _startup_test(False),
+        'yt_dlp_startup_no_plugins': _startup_test(True),
         'youtube_watch': _timed_http(_KNOWN_URL),
         'youtube_oembed': _timed_http(f'https://www.youtube.com/oembed?url={encoded}&format=json'),
         'pot_provider': legacy.pot_provider_status(),
@@ -209,7 +232,7 @@ def _network_selftest():
 legacy.base_opts = base_opts
 legacy.youtube_attempts = youtube_attempts
 legacy.extract_info_sync = extract_info_sync
-legacy.APP_VERSION = '1.15.3'
+legacy.APP_VERSION = '1.15.4'
 app.version = legacy.APP_VERSION
 
 
@@ -221,6 +244,8 @@ async def youtube_engine_status():
         'cookie_ready': legacy.youtube_cookie_ready(),
         'pot_provider': legacy.pot_provider_status(),
         'attempts': [item['name'] for item in youtube_attempts()],
+        'selftest_attempts': [item['name'] for item in SELFTEST_STRATEGIES],
+        'selftest_video': _SELFTEST_URL,
     }
 
 
