@@ -3,7 +3,9 @@ import os
 import shutil
 import tempfile
 import threading
-from http.cookiejar import MozillaCookieJar, LoadError
+import urllib.request
+from http.cookiejar import LoadError, MozillaCookieJar
+from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -15,7 +17,8 @@ from starlette.background import BackgroundTask
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
-app = FastAPI(title="RVL Media API", version="1.6.0")
+APP_VERSION = "1.7.0"
+app = FastAPI(title="RVL Media API", version=APP_VERSION)
 
 origins = [x.strip() for x in os.getenv(
     "WEB_ORIGINS",
@@ -39,6 +42,7 @@ MAX_FILESIZE = 500 * 1024 * 1024
 DOWNLOAD_SLOTS = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENT_DOWNLOADS", "2")))
 YOUTUBE_COOKIE_FILE = Path(os.getenv("YOUTUBE_COOKIE_FILE", "/etc/secrets/youtube-cookies.txt"))
 YOUTUBE_COOKIE_WORK_FILE = Path("/tmp/rvl-youtube-cookies.txt")
+POT_URL = os.getenv("YOUTUBE_POT_URL", "http://127.0.0.1:4416")
 YOUTUBE_UA = os.getenv(
     "YOUTUBE_USER_AGENT",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -67,8 +71,14 @@ def validate_url(value: str) -> str:
 
 
 def is_youtube(url: str) -> bool:
-    host = (urlparse(url).hostname or "").lower()
-    return "youtu" in host
+    return "youtu" in (urlparse(url).hostname or "").lower()
+
+
+def package_version(name: str) -> str | None:
+    try:
+        return pkg_version(name)
+    except PackageNotFoundError:
+        return None
 
 
 def cookie_file_status(path: Path) -> dict:
@@ -101,7 +111,6 @@ def get_writable_youtube_cookie() -> Path | None:
     global _cookie_initialized
     if not youtube_cookie_ready():
         return None
-
     with _cookie_lock:
         if not _cookie_initialized:
             try:
@@ -111,8 +120,15 @@ def get_writable_youtube_cookie() -> Path | None:
             except OSError as exc:
                 print(f"cookie copy error: {type(exc).__name__}: {exc}", flush=True)
                 return None
-
     return YOUTUBE_COOKIE_WORK_FILE if YOUTUBE_COOKIE_WORK_FILE.is_file() else None
+
+
+def pot_provider_status() -> bool:
+    try:
+        with urllib.request.urlopen(f"{POT_URL}/ping", timeout=2) as response:
+            return 200 <= response.status < 300
+    except Exception:
+        return False
 
 
 def base_opts(
@@ -122,7 +138,7 @@ def base_opts(
 ) -> dict:
     opts = {
         "quiet": True,
-        "no_warnings": True,
+        "no_warnings": False,
         "noplaylist": True,
         "socket_timeout": 30,
         "retries": 3,
@@ -133,32 +149,30 @@ def base_opts(
     }
 
     if url and is_youtube(url):
-        clients = youtube_clients or ["mweb", "web_safari"]
+        opts["js_runtimes"] = {"node": {}}
+        clients = youtube_clients or ["mweb"]
         opts["extractor_args"] = {
-            "youtube": {
-                "player_client": clients,
-            },
-            "youtubepot-bgutilhttp": {
-                "base_url": ["http://127.0.0.1:4416"],
-            },
+            "youtube": {"player_client": clients},
+            "youtubepot-bgutilhttp": {"base_url": [POT_URL]},
         }
         if use_cookie:
             cookie = get_writable_youtube_cookie()
             if cookie:
                 opts["cookiefile"] = str(cookie)
-
     return opts
 
 
 def extract_info_sync(url: str) -> dict:
-    # Metadata should not fail just because a client's default format selection
-    # is unavailable. mweb + POT is preferred, Safari is a useful HLS fallback.
+    attempts = [
+        ("mweb-pot-public", ["mweb"], False),
+        ("mweb-pot-cookie", ["mweb"], True),
+        ("default-cookie", ["default", "mweb"], True),
+        ("safari-cookie", ["default", "web_safari"], True),
+        ("embedded-public", ["web_embedded"], False),
+    ] if is_youtube(url) else [("default", None, False)]
+
     last_error = None
-    for clients, use_cookie in [
-        (["mweb", "web_safari"], True),
-        (["default", "mweb", "web_safari"], True),
-        (["web_embedded"], False),
-    ]:
+    for name, clients, use_cookie in attempts:
         try:
             opts = base_opts(url, clients, use_cookie)
             opts["skip_download"] = True
@@ -170,7 +184,7 @@ def extract_info_sync(url: str) -> dict:
                 return info
         except Exception as exc:
             last_error = exc
-            print(f"metadata attempt {clients} failed: {type(exc).__name__}: {exc}", flush=True)
+            print(f"metadata attempt={name} failed: {type(exc).__name__}: {exc}", flush=True)
     if last_error:
         raise last_error
     raise RuntimeError("Media tidak ditemukan.")
@@ -179,12 +193,12 @@ def extract_info_sync(url: str) -> dict:
 def format_selector(quality: str) -> tuple[str, bool]:
     quality = quality.lower().strip()
     if quality == "1080":
-        return "bestvideo*[height<=1080]+bestaudio/best[height<=1080]/best", False
+        return "bv*[height<=1080]+ba/b[height<=1080]/best[height<=1080]/best", False
     if quality == "720":
-        return "bestvideo*[height<=720]+bestaudio/best[height<=720]/best", False
+        return "bv*[height<=720]+ba/b[height<=720]/best[height<=720]/best", False
     if quality == "audio":
-        return "bestaudio/best", True
-    return "bestvideo*+bestaudio/best", False
+        return "ba/bestaudio/best", True
+    return "bv*+ba/bestvideo*+bestaudio/best", False
 
 
 def clear_workdir(workdir: str) -> None:
@@ -220,7 +234,6 @@ def run_download_attempt(
         "merge_output_format": "mp4",
         "windowsfilenames": True,
     })
-
     if audio_only:
         opts["postprocessors"] = [{
             "key": "FFmpegExtractAudio",
@@ -241,44 +254,35 @@ def run_download_attempt(
 
 
 def download_youtube_sync(url: str, quality: str, workdir: str) -> Path:
-    # Each row is a genuinely different YouTube extraction path. If one client
-    # returns metadata but no playable formats, move to the next client instead
-    # of retrying the same broken selector.
     attempts = [
-        ("mweb-pot", ["mweb"], True, None),
-        ("safari-hls", ["web_safari"], True, None),
-        ("combined", ["default", "mweb", "web_safari"], True, None),
-        ("embedded", ["web_embedded"], False, None),
+        ("mweb-pot-public", ["mweb"], False, None),
+        ("mweb-pot-cookie", ["mweb"], True, None),
+        ("default-cookie", ["default", "mweb"], True, None),
+        ("safari-cookie", ["default", "web_safari"], True, None),
+        ("embedded-public", ["web_embedded"], False, None),
+        ("android-vr", ["android_vr"], False, "best/18"),
     ]
-
-    # Last-resort path for public videos. Current YouTube behavior commonly
-    # leaves format 18 available to android_vr even when higher formats are
-    # restricted. It is enough to produce a working MP4 or extract MP3 audio.
-    attempts.append(("android-vr-18", ["android_vr"], False, "18/best"))
 
     errors = []
     for name, clients, use_cookie, selector_override in attempts:
         clear_workdir(workdir)
         try:
             print(
-                f"youtube download attempt={name} quality={quality} clients={clients} cookie={use_cookie}",
+                f"youtube attempt={name} quality={quality} clients={clients} "
+                f"cookie={use_cookie} ejs={package_version('yt-dlp-ejs')}",
                 flush=True,
             )
             path = run_download_attempt(
-                url,
-                quality,
-                workdir,
-                clients,
-                use_cookie,
-                selector_override,
+                url, quality, workdir, clients, use_cookie, selector_override,
             )
-            print(f"youtube download success attempt={name} file={path.name}", flush=True)
+            print(f"youtube success attempt={name} file={path.name}", flush=True)
             return path
         except Exception as exc:
-            errors.append(f"{name}: {type(exc).__name__}: {exc}")
-            print(f"youtube attempt failed {errors[-1]}", flush=True)
+            error = f"{name}: {type(exc).__name__}: {exc}"
+            errors.append(error)
+            print(f"youtube attempt failed {error}", flush=True)
 
-    raise DownloadError(" | ".join(errors[-5:]))
+    raise DownloadError(" | ".join(errors[-6:]))
 
 
 def download_sync(url: str, quality: str, workdir: str) -> Path:
@@ -299,7 +303,6 @@ def download_sync(url: str, quality: str, workdir: str) -> Path:
             "preferredcodec": "mp3",
             "preferredquality": "192",
         }]
-
     with YoutubeDL(opts) as ydl:
         ydl.extract_info(url, download=True)
 
@@ -316,14 +319,16 @@ def cleanup(path: str) -> None:
 def youtube_error_detail(exc: Exception) -> str:
     cookie = youtube_cookie_status()
     message = str(exc).lower()
+    if "no supported javascript runtime" in message or "challenge solving failed" in message:
+        return "Engine JavaScript YouTube belum aktif di server."
     if not cookie["exists"]:
         return "Cookie YouTube belum kebaca di Render. Tambahkan Secret File youtube-cookies.txt."
     if not cookie["valid"]:
         return "Cookie YouTube ada, tapi formatnya tidak valid. Export ulang sebagai Netscape cookies.txt."
     if "confirm you’re not a bot" in message or "confirm you're not a bot" in message or "sign in" in message:
-        return "Cookie YouTube terbaca, tapi ditolak/expired. Export cookie baru lalu ganti Secret File di Render."
+        return "YouTube masih menolak sesi server. Cookie terbaca, tapi challenge/login ditolak."
     if "requested format is not available" in message or "no video formats" in message:
-        return "YouTube tidak memberi format playable dari semua client fallback. Cek Logs Render."
+        return "YouTube tidak mengirim format playable ke server untuk video ini."
     return "YouTube gagal menyiapkan file. Cek Logs Render untuk attempt terakhir."
 
 
@@ -333,7 +338,7 @@ async def root():
     return {
         "name": "RVL Media API",
         "status": "ok",
-        "version": "1.6.0",
+        "version": APP_VERSION,
         "youtube_auth": cookie["valid"],
     }
 
@@ -344,11 +349,15 @@ async def health():
     working = cookie_file_status(YOUTUBE_COOKIE_WORK_FILE)
     return {
         "ok": True,
-        "version": "1.6.0",
+        "version": APP_VERSION,
         "youtube_auth": cookie["valid"],
         "youtube_cookie": cookie,
         "youtube_cookie_working": working,
-        "youtube_strategy": "mweb-pot>safari-hls>combined>embedded>android-vr-18",
+        "yt_dlp": package_version("yt-dlp"),
+        "yt_dlp_ejs": package_version("yt-dlp-ejs"),
+        "js_runtime": "node",
+        "pot_provider": pot_provider_status(),
+        "youtube_strategy": "mweb-public>mweb-cookie>default-cookie>safari-cookie>embedded>android-vr",
     }
 
 
@@ -366,8 +375,7 @@ async def media_info(body: URLBody):
         detail = youtube_error_detail(exc) if is_youtube(url) else "Gagal membaca media."
         raise HTTPException(status_code=500, detail=detail) from exc
 
-    host = (urlparse(url).hostname or "").lower()
-    platform = "youtube" if "youtu" in host else "tiktok"
+    platform = "youtube" if is_youtube(url) else "tiktok"
     return {
         "platform": platform,
         "id": info.get("id"),
