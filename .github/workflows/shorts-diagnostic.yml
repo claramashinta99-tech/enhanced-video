@@ -1,0 +1,51 @@
+name: RVL Shorts diagnostic
+
+on:
+  push:
+    branches: [pixel-shorts-v1]
+  workflow_dispatch:
+
+jobs:
+  shorts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      API: https://rvl-api.onrender.com
+      SHORTS: https://www.youtube.com/shorts/hLKiVtoD83k
+      WATCH: https://www.youtube.com/watch?v=hLKiVtoD83k
+    steps:
+      - name: Wake API
+        run: |
+          curl -fsS --max-time 35 "$API/health"
+
+      - name: Compare Shorts URL and canonical watch URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          for key in SHORTS WATCH; do
+            URL="${!key}"
+            PAYLOAD=$(python -c 'import json,os; print(json.dumps({"url":os.environ["URL"]}))' URL="$URL")
+            echo "=== $key ==="
+            curl -sS --max-time 45 -o "/tmp/${key}.json" -w 'http=%{http_code} total=%{time_total}s\n' -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/info"
+            cat "/tmp/${key}.json"; echo
+          done
+
+      - name: Download canonical Short as video
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAYLOAD='{"url":"https://www.youtube.com/watch?v=hLKiVtoD83k","quality":"best"}'
+          curl -fsS --max-time 45 -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/jobs" > /tmp/job.json
+          cat /tmp/job.json
+          JOB=$(python -c 'import json; print(json.load(open("/tmp/job.json"))["job_id"])')
+          for i in $(seq 1 120); do
+            curl -fsS --max-time 20 "$API/api/jobs/$JOB" > /tmp/state.json
+            cat /tmp/state.json; echo
+            STATE=$(python -c 'import json; print(json.load(open("/tmp/state.json"))["state"])')
+            [ "$STATE" = ready ] && break
+            [ "$STATE" = error ] && exit 1
+            sleep 1
+          done
+          test "$(python -c 'import json; print(json.load(open("/tmp/state.json"))["state"])')" = ready
+          curl -fsS -L --max-time 90 -o /tmp/short.mp4 -w 'file_http=%{http_code} bytes=%{size_download} total=%{time_total}s\n' "$API/api/jobs/$JOB/file"
+          test $(stat -c%s /tmp/short.mp4) -gt 100000
