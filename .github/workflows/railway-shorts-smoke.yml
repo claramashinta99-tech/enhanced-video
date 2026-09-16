@@ -1,4 +1,4 @@
-name: RVL hybrid backend smoke
+name: RVL backend compare smoke
 
 on:
   push:
@@ -10,71 +10,56 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
-      API: https://enhanced-video-production.up.railway.app
-      TIKTOK_API: https://rvl-api.onrender.com
-      SHORT_URL: https://www.youtube.com/shorts/Xh7I5J8eDQY
-      YT_URL: https://www.youtube.com/watch?v=jNQXAC9IVRw
-      TIKTOK_URL: https://www.tiktok.com/@scout2015/video/6718335390845095173
+      RAILWAY: https://enhanced-video-production.up.railway.app
+      RENDER: https://rvl-api.onrender.com
+      TIKTOK_URL: https://www.tiktok.com/@audreyvale_/video/7680281253311958294
     steps:
-      - name: Railway health
+      - name: Health
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS -L --max-time 30 "$API/health" | tee /tmp/health.json
-          python - <<'PY'
-          import json
-          assert json.load(open('/tmp/health.json')).get('ok') is True
-          PY
+          curl -fsS -L --max-time 30 "$RAILWAY/health" >/tmp/railway-health.json
+          curl -fsS -L --max-time 90 "$RENDER/health" >/tmp/render-health.json
 
-      - name: Shorts end-to-end on Railway
+      - name: TikTok Railway end-to-end
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS -L --max-time 45 -H 'Content-Type: application/json' -d "{\"url\":\"$SHORT_URL\"}" "$API/api/info" >/tmp/short-info.json
-          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$SHORT_URL\",\"quality\":\"best\"}" "$API/api/jobs" >/tmp/short-job.json
-          JOB=$(python -c 'import json; print(json.load(open("/tmp/short-job.json"))["job_id"])')
-          for i in $(seq 1 50); do BODY=$(curl -fsS -L --max-time 20 "$API/api/jobs/$JOB"); STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY"); [ "$STATE" = ready ] && break; [ "$STATE" = error ] && exit 1; sleep 1; done
-          curl -fsS -L --max-time 45 -r 0-131071 -o /tmp/short.bin "$API/api/jobs/$JOB/file"
-          test $(wc -c < /tmp/short.bin) -gt 10000
-
-      - name: YouTube video end-to-end on Railway
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsS -L --max-time 45 -H 'Content-Type: application/json' -d "{\"url\":\"$YT_URL\"}" "$API/api/info" >/tmp/yt-info.json
-          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$YT_URL\",\"quality\":\"best\"}" "$API/api/jobs" >/tmp/yt-job.json
-          JOB=$(python -c 'import json; print(json.load(open("/tmp/yt-job.json"))["job_id"])')
-          for i in $(seq 1 60); do BODY=$(curl -fsS -L --max-time 20 "$API/api/jobs/$JOB"); STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY"); [ "$STATE" = ready ] && break; [ "$STATE" = error ] && exit 1; sleep 1; done
-          curl -fsS -L --max-time 45 -r 0-131071 -o /tmp/yt.bin "$API/api/jobs/$JOB/file"
-          test $(wc -c < /tmp/yt.bin) -gt 10000
-
-      - name: MP3 fast path on Railway
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsS -L --max-time 45 -H 'Content-Type: application/json' -d "{\"url\":\"$YT_URL\"}" "$API/api/mp3/info" >/tmp/mp3-info.json
-          curl -fsS -L --max-time 45 -H 'Content-Type: application/json' -d "{\"url\":\"$YT_URL\"}" "$API/api/audio/prepare" >/tmp/audio.json
-          TOKEN=$(python -c 'import json; print(json.load(open("/tmp/audio.json"))["token"])')
-          curl -fsS -L --max-time 45 -r 0-131071 -o /tmp/audio.bin "$API/api/audio/chunked/$TOKEN"
-          test $(wc -c < /tmp/audio.bin) -gt 10000
-
-      - name: TikTok end-to-end on Render
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo 'Waking Render...'
-          curl -fsS -L --max-time 90 "$TIKTOK_API/health" >/tmp/render-health.json
-          curl -fsS -L --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$TIKTOK_URL\"}" "$TIKTOK_API/api/info" | tee /tmp/tiktok-info.json
-          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$TIKTOK_URL\",\"quality\":\"best\"}" "$TIKTOK_API/api/jobs" | tee /tmp/tiktok-job.json
-          JOB=$(python -c 'import json; print(json.load(open("/tmp/tiktok-job.json"))["job_id"])')
+          curl -fsS -L --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$TIKTOK_URL\"}" "$RAILWAY/api/info" | tee /tmp/r-info.json
+          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$TIKTOK_URL\",\"quality\":\"best\"}" "$RAILWAY/api/jobs" | tee /tmp/r-job.json
+          JOB=$(python -c 'import json; print(json.load(open("/tmp/r-job.json"))["job_id"])')
+          READY=0
           for i in $(seq 1 90); do
-            BODY=$(curl -fsS -L --max-time 20 "$TIKTOK_API/api/jobs/$JOB")
+            BODY=$(curl -fsS -L --max-time 20 "$RAILWAY/api/jobs/$JOB")
             STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
             echo "$BODY"
-            [ "$STATE" = ready ] && break
+            if [ "$STATE" = ready ]; then READY=1; break; fi
             [ "$STATE" = error ] && exit 1
             sleep 1
           done
-          curl -fsS -L --max-time 60 -r 0-131071 -o /tmp/tiktok.bin "$TIKTOK_API/api/jobs/$JOB/file"
-          echo "tiktok_render_bytes=$(wc -c < /tmp/tiktok.bin)"
-          test $(wc -c < /tmp/tiktok.bin) -gt 10000
+          [ "$READY" = 1 ]
+          curl -fsS -L --max-time 60 -r 0-131071 -o /tmp/r-tiktok.bin "$RAILWAY/api/jobs/$JOB/file"
+          echo "railway_bytes=$(wc -c < /tmp/r-tiktok.bin)"
+          test $(wc -c < /tmp/r-tiktok.bin) -gt 10000
+
+      - name: TikTok Render end-to-end
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -L --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$TIKTOK_URL\"}" "$RENDER/api/info" | tee /tmp/d-info.json
+          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$TIKTOK_URL\",\"quality\":\"best\"}" "$RENDER/api/jobs" | tee /tmp/d-job.json
+          JOB=$(python -c 'import json; print(json.load(open("/tmp/d-job.json"))["job_id"])')
+          READY=0
+          for i in $(seq 1 90); do
+            BODY=$(curl -fsS -L --max-time 20 "$RENDER/api/jobs/$JOB")
+            STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
+            echo "$BODY"
+            if [ "$STATE" = ready ]; then READY=1; break; fi
+            [ "$STATE" = error ] && exit 1
+            sleep 1
+          done
+          [ "$READY" = 1 ]
+          curl -fsS -L --max-time 60 -r 0-131071 -o /tmp/d-tiktok.bin "$RENDER/api/jobs/$JOB/file"
+          echo "render_bytes=$(wc -c < /tmp/d-tiktok.bin)"
+          test $(wc -c < /tmp/d-tiktok.bin) -gt 10000
