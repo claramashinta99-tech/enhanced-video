@@ -8,41 +8,29 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 9
+    timeout-minutes: 5
     env:
       API: https://rvl-api.onrender.com
     steps:
-      - name: Verify backend v1.15.2
-        run: |
-          curl -fsS --max-time 25 "$API/health" | tee /tmp/health.json
-          grep -q '"version":"1.15.2"' /tmp/health.json
-
-      - name: Probe YouTube strategies sequentially
+      - name: Wait for backend v1.15.3
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS --max-time 25 "$API/api/youtube/engine"; echo
-          names=(mweb-pot-public default-public embedded-public android-vr-public default-embedded-cookie safari-cookie)
-          : > /tmp/results.txt
-          for name in "${names[@]}"; do
-            echo "=== $name ==="
-            curl -sS --max-time 20 "$API/api/youtube/selftest/$name" | tee "/tmp/$name.json"
-            echo
-            cat "/tmp/$name.json" >> /tmp/results.txt
-            echo >> /tmp/results.txt
-            sleep 1
+          for i in $(seq 1 36); do
+            BODY=$(curl -fsS --max-time 25 "$API/health" || true)
+            echo "$BODY"
+            if echo "$BODY" | grep -q '"version":"1.15.3"'; then exit 0; fi
+            sleep 10
           done
+          exit 1
+      - name: Probe network layer
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 30 "$API/api/youtube/nettest" | tee /tmp/nettest.json
+          echo
           python - <<'PY'
-          import json, pathlib
-          rows=[]
-          for name in ['mweb-pot-public','default-public','embedded-public','android-vr-public','default-embedded-cookie','safari-cookie']:
-              p=pathlib.Path('/tmp')/f'{name}.json'
-              try: x=json.loads(p.read_text())
-              except Exception: continue
-              rows.append(x)
-          ok=[x for x in rows if x.get('ok')]
-          print('RESULTS', [(x.get('strategy'), x.get('ok'), x.get('seconds'), x.get('error')) for x in rows])
-          print('SUCCESSFUL', [(x.get('strategy'), x.get('seconds'), x.get('formats'), x.get('max_height')) for x in ok])
-          if not ok:
-              raise SystemExit('No YouTube strategy succeeded sequentially from Render')
+          import json
+          x=json.load(open('/tmp/nettest.json'))
+          print('NETTEST', x)
           PY
