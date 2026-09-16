@@ -2,6 +2,7 @@ import copy
 import json
 import re
 import subprocess
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -19,6 +20,8 @@ _ORIGINAL_DOWNLOAD_SYNC = legacy.download_sync
 _TIKTOK_STRATEGY = {'name': 'tiktok-fresh', 'clients': None, 'cookie': False}
 _TIKWM_STRATEGY = {'name': 'tikwm-fallback', 'clients': None, 'cookie': False}
 _TIKWM_API = 'https://www.tikwm.com/api/'
+_TIKWM_SUBMIT = 'https://tikwm.com/api/video/task/submit'
+_TIKWM_RESULT = 'https://tikwm.com/api/video/task/result?task_id='
 _TIKWM_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:141.0) Gecko/20100101 Firefox/141.0',
     'Accept': 'application/json, text/javascript, */*; q=0.01',
@@ -96,60 +99,103 @@ def _tikwm_candidates(url):
     return out
 
 
-def _tikwm_fetch(url):
+def _parse_tikwm_payload(payload, url):
+    data = payload.get('data')
+    if not isinstance(data, dict):
+        return None
+    detail = data.get('detail') if isinstance(data.get('detail'), dict) else data
+    if not isinstance(detail, dict):
+        return None
+    play = detail.get('hdplay') or detail.get('play') or detail.get('wmplay') or detail.get('play_url') or detail.get('url')
+    images = detail.get('images') or data.get('images') or []
+    if not play and not images:
+        return None
+    author = detail.get('author') or data.get('author') or {}
+    music = detail.get('music_info') or data.get('music_info') or {}
+    vid = detail.get('id') or detail.get('video_id') or data.get('video_id') or _video_id(url) or ''
+    if isinstance(vid, (int, float)):
+        vid = str(int(vid))
+    return {
+        'id': str(vid),
+        'title': detail.get('title') or detail.get('desc') or data.get('title') or 'TikTok video',
+        'thumbnail': detail.get('origin_cover') or detail.get('cover') or detail.get('ai_dynamic_cover') or data.get('cover') or None,
+        'duration': detail.get('duration') or data.get('duration'),
+        'uploader': author.get('unique_id') or author.get('uniqueId') or author.get('nickname') or _username(url),
+        'play_url': play,
+        'music_url': music.get('play') if isinstance(music, dict) else None,
+        'images': images if isinstance(images, list) else [],
+    }
+
+
+def _json_request(url, data=None, timeout=10):
+    headers = dict(_TIKWM_HEADERS)
+    if data is not None:
+        headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8'
+    req = urllib.request.Request(url, data=data, headers=headers)
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        return json.loads(response.read().decode('utf-8', 'replace'))
+
+
+def _tikwm_quick(url):
     last_error = None
-    for candidate in _tikwm_candidates(url):
+    # Keep the quick path short; the task API below is the stronger fallback.
+    for candidate in _tikwm_candidates(url)[:3]:
         try:
             endpoint = _TIKWM_API + '?' + urllib.parse.urlencode({'url': candidate, 'hd': '1'})
-            req = urllib.request.Request(endpoint, headers=_TIKWM_HEADERS)
-            with urllib.request.urlopen(req, timeout=12) as response:
-                payload = json.loads(response.read().decode('utf-8', 'replace'))
-            if payload.get('code') != 0 or not isinstance(payload.get('data'), dict):
+            payload = _json_request(endpoint, timeout=8)
+            if payload.get('code') == 0:
+                item = _parse_tikwm_payload(payload, url)
+                if item:
+                    return item
+            last_error = payload.get('msg') or payload.get('message') or f'code={payload.get("code")}'
+        except Exception as exc:
+            last_error = f'{type(exc).__name__}: {str(exc)[-180:]}'
+    print(f'tikwm quick failed id={_video_id(url)} detail={last_error}', flush=True)
+    return None
+
+
+def _tikwm_task(url):
+    last_error = None
+    for candidate in _tikwm_candidates(url)[:3]:
+        try:
+            body = urllib.parse.urlencode({'web': '1', 'url': candidate}).encode()
+            payload = _json_request(_TIKWM_SUBMIT, data=body, timeout=10)
+            task_id = (payload.get('data') or {}).get('task_id') if isinstance(payload.get('data'), dict) else None
+            if payload.get('code') != 0 or not task_id:
                 last_error = payload.get('msg') or payload.get('message') or f'code={payload.get("code")}'
                 continue
-            data = payload['data']
-            play = data.get('hdplay') or data.get('play') or data.get('wmplay')
-            images = data.get('images') or []
-            if not play and not images:
-                last_error = 'no media URL'
-                continue
-            author = data.get('author') or {}
-            return {
-                'id': str(data.get('id') or _video_id(url) or ''),
-                'title': data.get('title') or data.get('desc') or 'TikTok video',
-                'thumbnail': data.get('origin_cover') or data.get('cover') or data.get('ai_dynamic_cover') or None,
-                'duration': data.get('duration'),
-                'uploader': author.get('unique_id') or author.get('uniqueId') or author.get('nickname') or _username(url),
-                'play_url': play,
-                'music_url': (data.get('music_info') or {}).get('play') if isinstance(data.get('music_info'), dict) else None,
-                'images': images if isinstance(images, list) else [],
-            }
+            for _ in range(10):
+                time.sleep(0.7)
+                result = _json_request(_TIKWM_RESULT + urllib.parse.quote(str(task_id)), timeout=8)
+                if result.get('code') != 0 or not isinstance(result.get('data'), dict):
+                    continue
+                status = result['data'].get('status')
+                if status == 3:
+                    last_error = 'task failed'
+                    break
+                if status == 2:
+                    item = _parse_tikwm_payload(result, url)
+                    if item:
+                        print(f'tikwm task ok id={_video_id(url)}', flush=True)
+                        return item
+                    last_error = 'task finished without media'
+                    break
         except Exception as exc:
-            last_error = f'{type(exc).__name__}: {str(exc)[-240:]}'
-    print(f'tikwm fallback failed id={_video_id(url)} detail={last_error}', flush=True)
+            last_error = f'{type(exc).__name__}: {str(exc)[-180:]}'
+    print(f'tikwm task failed id={_video_id(url)} detail={last_error}', flush=True)
     return None
+
+
+def _tikwm_fetch(url):
+    return _tikwm_quick(url) or _tikwm_task(url)
 
 
 def _tikwm_as_info(url, item):
     formats = []
     if item.get('play_url'):
-        formats.append({
-            'format_id': 'tikwm-best',
-            'url': item['play_url'],
-            'ext': 'mp4',
-            'vcodec': 'h264',
-            'acodec': 'aac',
-            'protocol': 'https',
-        })
+        formats.append({'format_id': 'tikwm-best', 'url': item['play_url'], 'ext': 'mp4', 'vcodec': 'h264', 'acodec': 'aac', 'protocol': 'https'})
     if item.get('music_url'):
-        formats.append({
-            'format_id': 'tikwm-audio',
-            'url': item['music_url'],
-            'ext': 'mp3',
-            'vcodec': 'none',
-            'acodec': 'mp3',
-            'protocol': 'https',
-        })
+        formats.append({'format_id': 'tikwm-audio', 'url': item['music_url'], 'ext': 'mp3', 'vcodec': 'none', 'acodec': 'mp3', 'protocol': 'https'})
     return {
         'id': item.get('id') or _video_id(url),
         'title': item.get('title') or 'TikTok video',
@@ -167,16 +213,8 @@ def extract_info_sync(url):
     if not _is_tiktok(url):
         return _ORIGINAL_EXTRACT_INFO(url)
 
-    # TikTok CDN URLs are short lived. Refresh metadata on every inspect.
     opts = legacy.base_opts(url, None, False)
-    opts.update({
-        'skip_download': True,
-        'noplaylist': True,
-        'retries': 1,
-        'fragment_retries': 1,
-        'extractor_retries': 1,
-        'socket_timeout': 12,
-    })
+    opts.update({'skip_download': True, 'noplaylist': True, 'retries': 1, 'fragment_retries': 1, 'extractor_retries': 1, 'socket_timeout': 10})
     try:
         with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -216,11 +254,7 @@ def _safe_filename(value):
 
 
 def _stream_url_to_file(media_url, path, job_id=None, stage='Mengambil media'):
-    headers = {
-        'User-Agent': _TIKWM_HEADERS['User-Agent'],
-        'Referer': 'https://www.tiktok.com/',
-        'Accept': '*/*',
-    }
+    headers = {'User-Agent': _TIKWM_HEADERS['User-Agent'], 'Referer': 'https://www.tiktok.com/', 'Accept': '*/*'}
     req = urllib.request.Request(media_url, headers=headers)
     with urllib.request.urlopen(req, timeout=30) as response, open(path, 'wb') as out:
         total = int(response.headers.get('Content-Length') or 0)
@@ -243,7 +277,6 @@ def _download_tikwm(url, quality, workdir, job_id=None):
     item = _tikwm_fetch(url)
     if not item:
         raise DownloadError('TikWM fallback unavailable')
-
     legacy.clear_workdir(workdir)
     title = _safe_filename(item.get('title'))
     vid = item.get('id') or _video_id(url) or 'tiktok'
@@ -276,16 +309,7 @@ def download_sync(url, quality, workdir, job_id=None):
     legacy.clear_workdir(workdir)
 
     opts = legacy.base_opts(url, None, False)
-    opts.update({
-        'format': _tiktok_format(quality),
-        'outtmpl': str(Path(workdir) / '%(title).80B [%(id)s].%(ext)s'),
-        'windowsfilenames': True,
-        'noplaylist': True,
-        'retries': 1,
-        'fragment_retries': 1,
-        'extractor_retries': 1,
-        'socket_timeout': 15,
-    })
+    opts.update({'format': _tiktok_format(quality), 'outtmpl': str(Path(workdir) / '%(title).80B [%(id)s].%(ext)s'), 'windowsfilenames': True, 'noplaylist': True, 'retries': 1, 'fragment_retries': 1, 'extractor_retries': 1, 'socket_timeout': 12})
     if job_id:
         hooks, posts = legacy.make_progress_hooks(job_id, quality)
         opts['progress_hooks'] = hooks
@@ -294,7 +318,6 @@ def download_sync(url, quality, workdir, job_id=None):
         opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
 
     try:
-        # Fresh extraction + download in one call prevents expired CDN URLs.
         with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
         path = legacy.find_output(workdir)
@@ -315,5 +338,5 @@ def download_sync(url, quality, workdir, job_id=None):
 
 legacy.extract_info_sync = extract_info_sync
 legacy.download_sync = download_sync
-legacy.APP_VERSION = '1.15.8'
+legacy.APP_VERSION = '1.15.9'
 app.version = legacy.APP_VERSION
