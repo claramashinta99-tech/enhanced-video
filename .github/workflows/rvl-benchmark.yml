@@ -1,0 +1,121 @@
+name: RVL downloader benchmark
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/rvl-benchmark.yml'
+      - 'backend/**'
+      - 'assets/mp3.js'
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VIDEO_URL: 'https://www.youtube.com/watch?v=9_0Dk2B2zmA'
+      API: 'https://rvl-api.onrender.com'
+    steps:
+      - name: Wait for RVL backend v1.13.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 40); do
+            BODY=$(curl -fsS --max-time 20 "$API/health" || true)
+            echo "health[$i]=$BODY"
+            if echo "$BODY" | grep -q '"version":"1.13.0"'; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Backend did not reach v1.13.0 in time' >&2
+          exit 1
+
+      - name: Benchmark RVL check + fast audio
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAYLOAD=$(python - <<'PY'
+          import json, os
+          print(json.dumps({'url': os.environ['VIDEO_URL']}))
+          PY
+          )
+
+          echo '--- /api/mp3/info ---'
+          curl -sS --max-time 45 -o /tmp/info.json \
+            -w 'http=%{http_code} connect=%{time_connect}s ttfb=%{time_starttransfer}s total=%{time_total}s\n' \
+            -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/mp3/info"
+          cat /tmp/info.json; echo
+
+          echo '--- /api/audio/prepare ---'
+          curl -sS --max-time 45 -o /tmp/prepare.json \
+            -w 'http=%{http_code} connect=%{time_connect}s ttfb=%{time_starttransfer}s total=%{time_total}s\n' \
+            -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/audio/prepare"
+          cat /tmp/prepare.json; echo
+          TOKEN=$(python - <<'PY'
+          import json
+          print(json.load(open('/tmp/prepare.json')).get('token',''))
+          PY
+          )
+          test -n "$TOKEN"
+
+          echo '--- full fast-audio transfer through Render ---'
+          curl -sS -L --max-time 300 -o /dev/null \
+            -w 'http=%{http_code} dns=%{time_namelookup}s connect=%{time_connect}s ttfb=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} speed_Bps=%{speed_download}\n' \
+            "$API/api/audio/chunked/$TOKEN"
+
+          echo '--- first 1 MiB through Render ---'
+          curl -sS -L --max-time 90 -H 'Range: bytes=0-1048575' -o /dev/null \
+            -w 'http=%{http_code} ttfb=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} speed_Bps=%{speed_download}\n' \
+            "$API/api/audio/chunked/$TOKEN"
+
+      - name: Benchmark RVL MP3 job
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAYLOAD=$(python - <<'PY'
+          import json, os
+          print(json.dumps({'url': os.environ['VIDEO_URL'], 'quality':'audio'}))
+          PY
+          )
+          START=$(date +%s)
+          curl -sS --max-time 45 -H 'Content-Type: application/json' -d "$PAYLOAD" "$API/api/mp3/jobs" -o /tmp/job.json
+          cat /tmp/job.json; echo
+          JOB=$(python - <<'PY'
+          import json
+          print(json.load(open('/tmp/job.json')).get('job_id',''))
+          PY
+          )
+          test -n "$JOB"
+          for i in $(seq 1 150); do
+            BODY=$(curl -sS --max-time 20 "$API/api/jobs/$JOB")
+            NOW=$(date +%s)
+            echo "t=$((NOW-START))s $BODY"
+            STATE=$(python -c 'import sys,json; print(json.load(sys.stdin).get("state",""))' <<<"$BODY")
+            if [ "$STATE" = ready ]; then
+              echo '--- final MP3 file transfer ---'
+              curl -sS -L --max-time 180 -o /dev/null \
+                -w 'http=%{http_code} ttfb=%{time_starttransfer}s total=%{time_total}s bytes=%{size_download} speed_Bps=%{speed_download}\n' \
+                "$API/api/jobs/$JOB/file"
+              exit 0
+            fi
+            if [ "$STATE" = error ]; then exit 1; fi
+            sleep 2
+          done
+          echo 'MP3 job timed out' >&2
+          exit 1
+
+      - name: Compare direct yt-dlp from GitHub runner
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q -U 'yt-dlp[default,curl-cffi]'
+          yt-dlp --version
+          echo '--- metadata ---'
+          /usr/bin/time -f 'elapsed=%e sec' timeout 90 yt-dlp --no-warnings --skip-download --print '%(title)s | %(duration)s sec' "$VIDEO_URL"
+          echo '--- direct audio with yt-dlp native downloader, 4 MiB chunks ---'
+          rm -f /tmp/rvl-direct.*
+          /usr/bin/time -f 'elapsed=%e sec' timeout 180 yt-dlp --no-warnings --http-chunk-size 4M -f 'bestaudio[ext=m4a]/bestaudio' -o '/tmp/rvl-direct.%(ext)s' "$VIDEO_URL"
+          ls -lh /tmp/rvl-direct.*
