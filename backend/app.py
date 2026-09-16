@@ -7,7 +7,7 @@ from http.cookiejar import MozillaCookieJar, LoadError
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
@@ -15,7 +15,7 @@ from starlette.background import BackgroundTask
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
-app = FastAPI(title="RVL Media API", version="1.4.0")
+app = FastAPI(title="RVL Media API", version="1.5.0")
 
 origins = [x.strip() for x in os.getenv(
     "WEB_ORIGINS",
@@ -140,8 +140,6 @@ def extract_info_sync(url: str) -> dict:
     opts = base_opts(url)
     opts["skip_download"] = True
     with YoutubeDL(opts) as ydl:
-        # process=False avoids failing metadata lookup only because yt-dlp's
-        # default selected format is unavailable for one YouTube client.
         info = ydl.extract_info(url, download=False, process=False)
     if not info:
         raise RuntimeError("Media tidak ditemukan.")
@@ -153,12 +151,12 @@ def extract_info_sync(url: str) -> dict:
 def format_selector(quality: str) -> tuple[str, bool]:
     quality = quality.lower().strip()
     if quality == "1080":
-        return "bv*[height<=1080]+ba/b[height<=1080]/bv[height<=1080]+ba/b", False
+        return "bv[height<=1080]+ba/b[height<=1080]/best[height<=1080]/b", False
     if quality == "720":
-        return "bv*[height<=720]+ba/b[height<=720]/bv[height<=720]+ba/b", False
+        return "bv[height<=720]+ba/b[height<=720]/best[height<=720]/b", False
     if quality == "audio":
         return "ba/bestaudio/b", True
-    return "bv*+ba/b/bv+ba", False
+    return "bv+ba/bestvideo+bestaudio/b", False
 
 
 def download_sync(url: str, quality: str, workdir: str) -> Path:
@@ -200,7 +198,7 @@ def youtube_error_detail(exc: Exception) -> str:
     if "read-only file system" in message:
         return "Cookie YouTube kebaca, tapi backend belum bisa menulis cookie sementara."
     if "requested format is not available" in message or "no video formats" in message:
-        return "Format YouTube dari client ini nggak tersedia. Backend akan coba client fallback di deploy terbaru."
+        return "Format YouTube yang dipilih tidak tersedia untuk video ini. Coba kualitas lain."
     if "confirm you’re not a bot" in message or "confirm you're not a bot" in message or "sign in" in message:
         return "Cookie YouTube terbaca, tapi ditolak/expired. Export cookie baru lalu ganti Secret File di Render."
     return "YouTube gagal dibaca. Cek Logs Render untuk error yt-dlp terbaru."
@@ -212,7 +210,7 @@ async def root():
     return {
         "name": "RVL Media API",
         "status": "ok",
-        "version": "1.4.0",
+        "version": "1.5.0",
         "youtube_auth": cookie["valid"],
     }
 
@@ -223,7 +221,7 @@ async def health():
     working = cookie_file_status(YOUTUBE_COOKIE_WORK_FILE)
     return {
         "ok": True,
-        "version": "1.4.0",
+        "version": "1.5.0",
         "youtube_auth": cookie["valid"],
         "youtube_cookie": cookie,
         "youtube_cookie_working": working,
@@ -262,10 +260,9 @@ async def media_info(body: URLBody):
     }
 
 
-@app.post("/api/download")
-async def download_media(body: DownloadBody, request: Request):
-    url = validate_url(body.url)
-    quality = body.quality.lower().strip()
+async def make_download_response(url: str, quality: str):
+    url = validate_url(url)
+    quality = quality.lower().strip()
     if quality not in {"best", "1080", "720", "audio"}:
         raise HTTPException(status_code=400, detail="Pilihan kualitas tidak valid.")
 
@@ -289,5 +286,16 @@ async def download_media(body: DownloadBody, request: Request):
         path=str(path),
         filename=path.name,
         media_type=media_type,
+        headers={"Cache-Control": "no-store"},
         background=BackgroundTask(cleanup, workdir),
     )
+
+
+@app.post("/api/download")
+async def download_media(body: DownloadBody):
+    return await make_download_response(str(body.url), body.quality)
+
+
+@app.get("/api/download")
+async def download_media_direct(url: str, quality: str = "best"):
+    return await make_download_response(url, quality)
