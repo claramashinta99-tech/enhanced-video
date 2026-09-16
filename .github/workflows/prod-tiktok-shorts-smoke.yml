@@ -1,0 +1,84 @@
+name: RVL production media smoke
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      API: https://enhanced-video-production.up.railway.app
+      TIKTOK_URL: https://www.tiktok.com/@bukanpidel1/video/7669610923919363349
+      SHORT_URL: https://www.youtube.com/shorts/Xh7I5J8eDQY
+    steps:
+      - name: Wait for backend v1.15.7
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 50); do
+            BODY=$(curl -fsS -L --max-time 20 "$API/health" || true)
+            echo "$BODY"
+            VER=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("version",""))' "$BODY" 2>/dev/null || true)
+            if [ "$VER" = "1.15.7" ]; then exit 0; fi
+            sleep 6
+          done
+          echo 'backend did not reach 1.15.7'
+          exit 1
+
+      - name: TikTok metadata and thumbnail
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -L --max-time 45 -H 'Content-Type: application/json' -d "{\"url\":\"$TIKTOK_URL\"}" "$API/api/info" | tee /tmp/tiktok-info.json
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/tiktok-info.json'))
+          print({k:x.get(k) for k in ['platform','id','title','thumbnail','duration','choices']})
+          assert x.get('platform') == 'tiktok'
+          assert x.get('id') == '7669610923919363349'
+          assert x.get('thumbnail')
+          assert x.get('choices')
+          PY
+
+      - name: TikTok end-to-end download
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$TIKTOK_URL\",\"quality\":\"best\"}" "$API/api/jobs" | tee /tmp/tiktok-job.json
+          JOB=$(python -c 'import json; print(json.load(open("/tmp/tiktok-job.json"))["job_id"])')
+          READY=0
+          for i in $(seq 1 60); do
+            BODY=$(curl -fsS -L --max-time 20 "$API/api/jobs/$JOB")
+            echo "$BODY"
+            STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
+            if [ "$STATE" = ready ]; then READY=1; break; fi
+            [ "$STATE" = error ] && exit 1
+            sleep 1
+          done
+          [ "$READY" = 1 ]
+          curl -fsS -L --max-time 60 -r 0-131071 -o /tmp/tiktok.bin "$API/api/jobs/$JOB/file"
+          BYTES=$(wc -c < /tmp/tiktok.bin)
+          echo "tiktok_bytes=$BYTES"
+          test "$BYTES" -gt 10000
+
+      - name: Shorts end-to-end
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -L --max-time 45 -H 'Content-Type: application/json' -d "{\"url\":\"$SHORT_URL\"}" "$API/api/info" >/tmp/short-info.json
+          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$SHORT_URL\",\"quality\":\"best\"}" "$API/api/jobs" >/tmp/short-job.json
+          JOB=$(python -c 'import json; print(json.load(open("/tmp/short-job.json"))["job_id"])')
+          READY=0
+          for i in $(seq 1 60); do
+            BODY=$(curl -fsS -L --max-time 20 "$API/api/jobs/$JOB")
+            STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
+            if [ "$STATE" = ready ]; then READY=1; break; fi
+            [ "$STATE" = error ] && exit 1
+            sleep 1
+          done
+          [ "$READY" = 1 ]
+          curl -fsS -L --max-time 60 -r 0-131071 -o /tmp/short.bin "$API/api/jobs/$JOB/file"
+          test $(wc -c < /tmp/short.bin) -gt 10000
