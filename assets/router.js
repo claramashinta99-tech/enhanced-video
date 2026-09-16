@@ -11,7 +11,7 @@
     document.querySelectorAll('script[data-rvl-route-script]').forEach(s=>s.remove());document.querySelector('#rvl-download-frame')?.remove();
     let src=null,type=null;
     if(path==='/'){ensureHomeCss();src=`/assets/home.js?route=${Date.now()}`}
-    else if(path==='/clarity/'){src=`/assets/clarity.js?route=${Date.now()}`;type='module'}
+    else if(path==='/clarity/'){src=`/assets/clarity-route.js?route=${Date.now()}`;type='module'}
     else if(path==='/tiktok-downloader/'||path==='/youtube-downloader/'){src=`/assets/downloader.js?route=${Date.now()}`}
     else if(path==='/youtube-shorts/'){src=`/assets/shorts.js?route=${Date.now()}`}
     else if(path==='/youtube-mp3/'){src=`/assets/mp3.js?route=${Date.now()}`}
