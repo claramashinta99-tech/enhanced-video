@@ -1,0 +1,65 @@
+name: Deploy Railway production
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'Dockerfile'
+      - '.github/workflows/deploy-railway.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+      RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVICE }}
+      RAILWAY_ENVIRONMENT: ${{ secrets.RAILWAY_ENVIRONMENT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Verify Railway auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${RAILWAY_TOKEN:-}" ] && [ -z "${RAILWAY_API_TOKEN:-}" ]; then
+            echo 'No Railway token secret is configured in this repository.' >&2
+            exit 2
+          fi
+          railway --version
+
+      - name: Deploy current main to Railway
+        shell: bash
+        run: |
+          set -euo pipefail
+          ENV_NAME="${RAILWAY_ENVIRONMENT:-production}"
+          ARGS=(up --ci --message "GitHub ${GITHUB_SHA}")
+          if [ -n "${RAILWAY_PROJECT_ID:-}" ]; then
+            ARGS+=(--project "$RAILWAY_PROJECT_ID" --environment "$ENV_NAME")
+          fi
+          if [ -n "${RAILWAY_SERVICE:-}" ]; then
+            ARGS+=(--service "$RAILWAY_SERVICE")
+          fi
+          railway "${ARGS[@]}"
+
+      - name: Verify production backend
+        shell: bash
+        env:
+          API: https://enhanced-video-production.up.railway.app
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 45); do
+            BODY=$(curl -fsS -L --max-time 20 "$API/health" || true)
+            echo "health[$i]=$BODY"
+            VER=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("version",""))' "$BODY" 2>/dev/null || true)
+            [ "$VER" = "1.16.0" ] && exit 0
+            sleep 5
+          done
+          exit 1
