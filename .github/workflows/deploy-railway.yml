@@ -1,4 +1,4 @@
-name: Deploy Railway production
+name: Verify Railway production
 
 on:
   push:
@@ -6,60 +6,75 @@ on:
     paths:
       - 'backend/**'
       - 'Dockerfile'
-      - '.github/workflows/deploy-railway.yml'
   workflow_dispatch:
 
 jobs:
-  deploy:
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-      RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
-      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
-      RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVICE }}
-      RAILWAY_ENVIRONMENT: ${{ secrets.RAILWAY_ENVIRONMENT }}
+      API: https://enhanced-video-production.up.railway.app
+      TIKTOK_URL: https://www.tiktok.com/@bukanpidel1/video/7669610923919363349
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
-
-      - name: Verify Railway auth
+      - name: Wait for Railway auto-deploy
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${RAILWAY_TOKEN:-}" ] && [ -z "${RAILWAY_API_TOKEN:-}" ]; then
-            echo 'No Railway token secret is configured in this repository.' >&2
-            exit 2
-          fi
-          railway --version
-
-      - name: Deploy current main to Railway
-        shell: bash
-        run: |
-          set -euo pipefail
-          ENV_NAME="${RAILWAY_ENVIRONMENT:-production}"
-          ARGS=(up --ci --message "GitHub ${GITHUB_SHA}")
-          if [ -n "${RAILWAY_PROJECT_ID:-}" ]; then
-            ARGS+=(--project "$RAILWAY_PROJECT_ID" --environment "$ENV_NAME")
-          fi
-          if [ -n "${RAILWAY_SERVICE:-}" ]; then
-            ARGS+=(--service "$RAILWAY_SERVICE")
-          fi
-          railway "${ARGS[@]}"
-
-      - name: Verify production backend
-        shell: bash
-        env:
-          API: https://enhanced-video-production.up.railway.app
-        run: |
-          set -euo pipefail
-          for i in $(seq 1 45); do
+          for i in $(seq 1 100); do
             BODY=$(curl -fsS -L --max-time 20 "$API/health" || true)
             echo "health[$i]=$BODY"
             VER=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("version",""))' "$BODY" 2>/dev/null || true)
-            [ "$VER" = "1.16.0" ] && exit 0
-            sleep 5
+            if [ "$VER" = "1.16.0" ]; then
+              exit 0
+            fi
+            sleep 6
           done
+          echo 'Railway did not reach TikTok HD backend v1.16.0 in time' >&2
           exit 1
+
+      - name: Verify TikTok Normal and HD choices
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -L --max-time 90 \
+            -H 'Content-Type: application/json' \
+            -d "{\"url\":\"$TIKTOK_URL\"}" \
+            "$API/api/info" | tee /tmp/tiktok-info.json
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/tiktok-info.json'))
+          choices=x.get('choices') or []
+          print({'platform':x.get('platform'),'id':x.get('id'),'choices':choices})
+          assert x.get('platform') == 'tiktok'
+          assert [c.get('id') for c in choices] == ['best','2160'], choices
+          assert choices[0].get('label') == 'Normal'
+          assert (choices[1].get('label') or '').startswith('HD')
+          PY
+
+      - name: Verify TikTok HD download
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -L --max-time 30 \
+            -H 'Content-Type: application/json' \
+            -d "{\"url\":\"$TIKTOK_URL\",\"quality\":\"2160\"}" \
+            "$API/api/jobs" | tee /tmp/tiktok-job.json
+          JOB=$(python -c 'import json; print(json.load(open("/tmp/tiktok-job.json"))["job_id"])')
+          READY=0
+          for i in $(seq 1 90); do
+            BODY=$(curl -fsS -L --max-time 20 "$API/api/jobs/$JOB")
+            echo "$BODY"
+            STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
+            if [ "$STATE" = ready ]; then
+              python -c 'import json,sys; x=json.loads(sys.argv[1]); assert "_hd" in (x.get("filename") or "").lower(), x' "$BODY"
+              READY=1
+              break
+            fi
+            [ "$STATE" = error ] && exit 1
+            sleep 1
+          done
+          [ "$READY" = 1 ]
+          curl -fsS -L --max-time 60 -r 0-131071 -o /tmp/tiktok-hd.bin "$API/api/jobs/$JOB/file"
+          BYTES=$(wc -c < /tmp/tiktok-hd.bin)
+          echo "tiktok_hd_bytes=$BYTES"
+          test "$BYTES" -gt 10000
