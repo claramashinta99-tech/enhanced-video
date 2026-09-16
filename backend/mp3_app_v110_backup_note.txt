@@ -1,0 +1,1 @@
+Snapshot marker before MP3 pipeline v1.11.0 refactor. Current main prior to this marker used backend/mp3_app.py v1.10.0 with yt-dlp download-then-convert flow. Full repository history remains available in Git.
