@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from yt_dlp.utils import DownloadError
 
 app=legacy.app
-legacy.APP_VERSION='1.12.6';app.version=legacy.APP_VERSION
+legacy.APP_VERSION='1.12.7';app.version=legacy.APP_VERSION
 MP3_SOURCE_TTL=600;MP3_PREP_WAIT=18;AUDIO_TOKEN_TTL=180;AUDIO_STREAM_CONCURRENCY=4
 _mp3_source_lock=threading.Lock();_mp3_sources={};_audio_token_lock=threading.Lock();_audio_tokens={};_audio_stream_slots=threading.BoundedSemaphore(AUDIO_STREAM_CONCURRENCY)
 
@@ -62,17 +62,24 @@ def _audio_source_from_info(info):
  return max(candidates,key=lambda x:x[0])[1] if candidates else None
 
 def _mp3_attempts():
- # web_safari exposes HLS media that currently avoids the GVS PO-token requirement.
- attempts=[{'name':'safari-hls-public','clients':['web_safari'],'cookie':False}]
+ # Restore the client order that powered the fast Railway MP3 path before the later mweb-only experiments.
+ attempts=[
+  {'name':'visionos-web-public','clients':['visionos','web'],'cookie':False},
+  {'name':'tv-public','clients':['tv','tv_downgraded'],'cookie':False},
+  {'name':'android-vr-public','clients':['android_vr'],'cookie':False},
+  {'name':'embedded-public','clients':['web_embedded'],'cookie':False},
+ ]
+ if legacy.youtube_cookie_ready():
+  attempts.insert(0,{'name':'web-cookie','clients':['web'],'cookie':True})
  for s in legacy.youtube_attempts():
-  if s not in attempts:attempts.append(s)
+  if not any(x.get('name')==s.get('name') for x in attempts):attempts.append(s)
  return attempts
 
 def _prepare_audio_source_sync(url):
  started=time.monotonic();errors=[]
  for strategy in _mp3_attempts():
   try:
-   opts=legacy.base_opts(url,strategy.get('clients'),strategy.get('cookie',False));opts.update({'format':'bestaudio/best','skip_download':True,'socket_timeout':8,'retries':0,'fragment_retries':0,'extractor_retries':0,'cachedir':False})
+   opts=legacy.base_opts(url,strategy.get('clients'),strategy.get('cookie',False));opts.update({'format':'bestaudio[ext=m4a]/bestaudio/best','skip_download':True,'socket_timeout':8,'retries':0,'fragment_retries':0,'extractor_retries':0,'cachedir':False})
    with legacy.YoutubeDL(opts) as y:info=y.extract_info(url,download=False)
    if info and info.get('entries'):info=next((x for x in info['entries'] if x),info)
    source=_audio_source_from_info(info)
@@ -130,13 +137,29 @@ def _transcode_direct(source_data,workdir,job_id=None):
  if job_id:legacy.job_update(job_id,state='working',progress=97,stage='Finalisasi')
  print(f'mp3 direct transcode done ms={int((time.monotonic()-started)*1000)} bytes={output.stat().st_size}',flush=True);return output
 
+def _download_mp3_fallback(url,workdir,job_id=None):
+ errors=[]
+ for strategy in _mp3_attempts():
+  try:
+   legacy.clear_workdir(workdir)
+   if job_id:legacy.job_update(job_id,state='working',progress=10,stage='Mengambil audio')
+   opts=legacy.dl_opts(url,'audio',workdir,strategy,None,job_id);opts.update({'socket_timeout':10,'retries':1,'fragment_retries':1,'extractor_retries':0,'cachedir':False})
+   with legacy.YoutubeDL(opts) as y:info=y.extract_info(url,download=True)
+   path=legacy.find_output(workdir)
+   if info:
+    if info.get('entries'):info=next((x for x in info['entries'] if x),info)
+    try:legacy.cache_put(url,info,strategy)
+    except Exception:pass
+   return path
+  except Exception as exc:errors.append(f"{strategy.get('name')}:{type(exc).__name__}")
+ print(f"mp3 fallback failed attempts={','.join(errors)}",flush=True);raise DownloadError('mp3 download failed')
+
 def fast_mp3_sync(url,workdir,job_id=None):
  if job_id:legacy.job_update(job_id,state='working',progress=8,stage='Menyiapkan audio')
  try:return _transcode_direct(_wait_source(url),workdir,job_id)
  except Exception as exc:
-  print(f'mp3 fast path fallback type={type(exc).__name__}',flush=True)
-  if job_id:legacy.job_update(job_id,state='working',progress=8,stage='Fallback audio')
-  legacy.clear_workdir(workdir);return legacy.download_sync(url,'audio',workdir,job_id)
+  print(f'mp3 direct path fallback type={type(exc).__name__}',flush=True)
+  return _download_mp3_fallback(url,workdir,job_id)
 
 def _purge_audio_tokens():
  cutoff=time.time()-AUDIO_TOKEN_TTL
