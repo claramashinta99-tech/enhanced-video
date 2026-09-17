@@ -23,8 +23,8 @@
       8vw 13vh 0 #6ed8ff,19vw 31vh 0 #ff91c8,31vw 17vh 0 #ffd977,43vw 39vh 0 #6ed8ff,57vw 14vh 0 #aa8cff,68vw 34vh 0 #ffd977,82vw 22vh 0 #6ed8ff,91vw 44vh 0 #ff91c8,
       12vw 68vh 0 #aa8cff,27vw 78vh 0 #6ed8ff,46vw 71vh 0 #ffd977,64vw 82vh 0 #ff91c8,79vw 65vh 0 #6ed8ff,93vw 76vh 0 #aa8cff;opacity:.48}
     .mp3-pixel-bg:after{left:4px;top:4px;opacity:.20;filter:blur(.2px)}
-    body>.shell{position:relative;z-index:1;overflow:visible!important}
-    .nav{min-height:78px!important;height:78px!important;box-sizing:border-box!important;overflow:visible!important;background:rgba(18,26,48,.82)!important;border-color:#35446a!important;box-shadow:0 6px 0 #070a14!important;backdrop-filter:blur(10px)}
+    body[data-platform="youtube-mp3"]>.shell{position:relative;z-index:1;overflow:visible!important;padding-top:14px}
+    body[data-platform="youtube-mp3"] .nav{min-height:78px!important;height:78px!important;box-sizing:border-box!important;overflow:visible!important;background:rgba(18,26,48,.82)!important;border:2px solid #35446a!important;border-radius:4px!important;box-shadow:0 6px 0 #070a14!important;backdrop-filter:blur(10px)}
     .nav-right{display:flex!important;align-items:center!important;gap:10px!important;overflow:visible!important}
     .brand,.nav-right>*{flex-shrink:0}
     .downloader-head h1{color:#fff!important;text-shadow:3px 3px 0 #201842,6px 6px 0 rgba(170,140,255,.14)!important}
@@ -33,7 +33,7 @@
     .download-input,.audio-mode{background:#0c1224!important;border-color:#263453!important;color:#fff!important}
     .btn.primary{background:linear-gradient(#cbbcff,#aa8cff)!important;color:#101426!important;border-color:#101426!important;box-shadow:4px 4px 0 #070a14!important}
     .text-link{color:#6ed8ff!important}
-    @media(max-width:700px){.mp3-pixel-bg{background-size:auto,auto,auto,20px 20px,20px 20px,auto}.download-card{border-width:2px!important}.nav{min-height:70px!important;height:70px!important}.nav-right{gap:6px!important}.nav-link{display:none!important}}
+    @media(max-width:700px){.mp3-pixel-bg{background-size:auto,auto,auto,20px 20px,20px 20px,auto}.download-card{border-width:2px!important}body[data-platform="youtube-mp3"]>.shell{padding-top:10px}.nav{min-height:70px!important;height:70px!important}.nav-right{gap:6px!important}.nav-link{display:none!important}}
   </style>
   <script defer src="../assets/mp3.js?v=11"></script>
   <script defer src="../assets/tools-menu.js?v=1"></script>
