@@ -77,11 +77,10 @@
     const panel=document.createElement('div');
     panel.className='rvl-tools-panel';
     panel.setAttribute('aria-hidden','true');
-    const current=location.pathname.replace(/\/+$/,'')+'/';
     for(const [label,href] of tools){
       const a=document.createElement('a');
-      a.href=href;a.textContent=label;
-      if(href===current)a.classList.add('active');
+      a.href=href;
+      a.textContent=label;
       panel.appendChild(a);
     }
     trigger.parentNode.insertBefore(wrap,trigger);
@@ -168,7 +167,6 @@
         box-shadow:inset 0 1px 0 rgba(255,255,255,.02);
       }
       .rvl-tools-panel a:hover{background:#17223d;border-color:#53668f;color:#fff;transform:translateX(1px)}
-      .rvl-tools-panel a.active{border-color:#42675a;color:#9af0cf;background:#11251f;box-shadow:inset 3px 0 0 #68e6c2}
 
       body[data-platform="youtube-mp3"] .nav-right{gap:10px!important}
       body[data-platform="youtube-mp3"] .music-toggle.rvl-music-text,
@@ -194,7 +192,6 @@
       body[data-platform="youtube-mp3"] .rvl-tools-panel:before{background:#111;border-left:1px solid #2e2e2e;border-top:1px solid #2e2e2e}
       body[data-platform="youtube-mp3"] .rvl-tools-panel a{border:1px solid #252525;border-radius:7px;background:#151515;color:#d0d0d0;font-size:12px;font-weight:550}
       body[data-platform="youtube-mp3"] .rvl-tools-panel a:hover{background:#1d1d1d;border-color:#3d3d3d;color:#fff;transform:none}
-      body[data-platform="youtube-mp3"] .rvl-tools-panel a.active{border-color:#35483f;color:#b7e5ce;background:#132019;box-shadow:inset 3px 0 0 #6fae90}
 
       @media(max-width:700px){
         .nav-right{gap:6px!important}
