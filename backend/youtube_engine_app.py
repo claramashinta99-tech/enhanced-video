@@ -56,6 +56,14 @@ SELFTEST_STRATEGIES = [
     {'name': 'visionos-mobile-skip', 'clients': ['visionos'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs'], 'innertube_host': 'm.youtube.com'},
     {'name': 'visionos-nocookie-skip', 'clients': ['visionos'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs'], 'innertube_host': 'www.youtube-nocookie.com'},
     {'name': 'visionos-googleapis-skip', 'clients': ['visionos'], 'cookie': False, 'disable_plugins': True, 'player_skip': ['webpage', 'configs'], 'innertube_host': 'youtubei.googleapis.com'},
+    {'name': 'web-cookie-test', 'clients': ['web'], 'cookie': True},
+    {'name': 'mweb-cookie-test', 'clients': ['mweb'], 'cookie': True},
+    {'name': 'safari-cookie-test', 'clients': ['web_safari'], 'cookie': True},
+    {'name': 'creator-cookie-test', 'clients': ['web_creator'], 'cookie': True},
+    {'name': 'music-cookie-test', 'clients': ['web_music'], 'cookie': True},
+    {'name': 'tv-cookie-test', 'clients': ['tv'], 'cookie': True},
+    {'name': 'ios-cookie-test', 'clients': ['ios'], 'cookie': True},
+    {'name': 'android-cookie-test', 'clients': ['android'], 'cookie': True},
 ]
 
 
@@ -218,7 +226,7 @@ def _network_selftest():
 legacy.base_opts = base_opts
 legacy.youtube_attempts = youtube_attempts
 legacy.extract_info_sync = extract_info_sync
-legacy.APP_VERSION = '1.15.6'
+legacy.APP_VERSION = '1.15.7'
 app.version = legacy.APP_VERSION
 
 
@@ -236,12 +244,18 @@ async def youtube_engine_status():
 
 
 @app.get('/api/youtube/selftest/{strategy_name}')
-async def youtube_strategy_selftest(strategy_name: str):
+async def youtube_strategy_selftest(strategy_name: str, url: str = _SELFTEST_URL):
     strategy = _strategy_by_name(strategy_name)
     if not strategy:
         raise HTTPException(404, 'Unknown YouTube strategy')
-    result = await asyncio.to_thread(_cli_extract, strategy)
-    return {'strategy': strategy_name, **result}
+    try:
+        target = legacy.validate_url(url)
+    except Exception as exc:
+        raise HTTPException(400, 'Invalid YouTube URL') from exc
+    if not legacy.is_youtube(target):
+        raise HTTPException(400, 'YouTube URL required')
+    result = await asyncio.to_thread(_cli_extract, strategy, target)
+    return {'strategy': strategy_name, 'url': target, **result}
 
 
 @app.get('/api/youtube/nettest')
