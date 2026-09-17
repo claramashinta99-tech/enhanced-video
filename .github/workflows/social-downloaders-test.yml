@@ -1,11 +1,10 @@
-name: Social downloader branch test
+name: Social downloader final isolation test
 
 on:
   push:
     branches: [feature-social-downloaders-20260918]
     paths:
       - backend/social_downloaders_app.py
-      - backend/requirements.txt
       - Dockerfile
       - .github/workflows/social-downloaders-test.yml
   workflow_dispatch:
@@ -25,44 +24,65 @@ jobs:
           sudo apt-get install -y -qq ffmpeg
           python -m pip install -q --upgrade pip
           python -m pip install -q -r backend/requirements.txt
-      - name: Find an anonymous Instagram video with audio
+      - name: Compile isolated social backend
+        run: python -m py_compile backend/social_downloaders_app.py
+      - name: Verify golden backend routes are preserved
         env:
           PYTHONPATH: backend
         run: |
           python - <<'PY'
-          import json, shutil, subprocess, tempfile
+          import tiktok_hd_app as base
+          before={(getattr(r,'path',None), tuple(sorted(getattr(r,'methods',[]) or []))) for r in base.app.routes}
+          import social_downloaders_app as social
+          after={(getattr(r,'path',None), tuple(sorted(getattr(r,'methods',[]) or []))) for r in social.app.routes}
+          missing=before-after
+          assert social.app is base.app
+          assert not missing, f'golden routes missing: {sorted(missing)}'
+          required={
+            '/api/social/health',
+            '/api/social/info',
+            '/api/social/jobs',
+          }
+          paths={getattr(r,'path',None) for r in social.app.routes}
+          assert required <= paths, f'social routes missing: {sorted(required-paths)}'
+          print('golden_routes_preserved=',len(before),'total_routes=',len(after))
+          PY
+      - name: End to end Facebook Instagram and X
+        env:
+          PYTHONPATH: backend
+        run: |
+          python - <<'PY'
+          import json, shutil, subprocess, tempfile, time
           from pathlib import Path
           import social_downloaders_app as s
 
-          urls=[
-            'https://instagram.com/p/aye83DjauH/',
-            'https://www.instagram.com/reel/CDUMkliABpa/',
-            'https://www.instagram.com/marvelskies.fc/reel/CWqAgUZgCku/',
-            'https://www.instagram.com/reels/Cop84x6u7CP/',
-            'https://www.instagram.com/p/BQ0eAlwhDrw/',
-          ]
-          winner=None
-          for url in urls:
+          tests={
+            'facebook':'https://www.facebook.com/cnn/videos/10155529876156509/',
+            'instagram':'https://www.instagram.com/reel/CDUMkliABpa/',
+            'x':'https://x.com/MunTheShinobi/status/1600009574919962625',
+          }
+          results={}
+          for platform,url in tests.items():
+              work=tempfile.mkdtemp(prefix=f'rvl-final-{platform}-')
+              started=time.time()
               try:
-                  info=s.extract_social_info(url,'instagram')
-                  safe=[{k:f.get(k) for k in ('format_id','ext','width','height','vcodec','acodec','format_note')} for f in info.get('formats') or []]
-                  probable_audio=any(f.get('acodec')!='none' for f in info.get('formats') or [])
-                  print('CANDIDATE',url,'id=',info.get('id'),'probable_audio=',probable_audio,'formats=',json.dumps(safe,ensure_ascii=False))
-                  if probable_audio and winner is None:
-                      winner=url
-              except Exception as exc:
-                  print('CANDIDATE_FAIL',url,type(exc).__name__,str(exc)[-300:])
-          if not winner:
-              raise SystemExit('no anonymous Instagram audio candidate found')
-          print('WINNER=',winner)
-          work=tempfile.mkdtemp(prefix='rvl-ig-audio-')
-          try:
-              path=s.download_social_sync(winner,'instagram','best',work)
-              size=Path(path).stat().st_size
-              streams=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_entries','stream=codec_type,codec_name,width,height','-of','json',str(path)],text=True,timeout=30)).get('streams') or []
-              print('WINNER_RESULT=',json.dumps({'file':Path(path).name,'bytes':size,'streams':streams},ensure_ascii=False))
-              assert any(x.get('codec_type')=='video' for x in streams),streams
-              assert any(x.get('codec_type')=='audio' for x in streams),streams
-          finally:
-              shutil.rmtree(work,ignore_errors=True)
+                  info=s.extract_social_info(url,platform)
+                  assert s._video_formats(info), f'no video formats for {platform}'
+                  path=s.download_social_sync(url,platform,'best',work)
+                  size=Path(path).stat().st_size
+                  streams=json.loads(subprocess.check_output([
+                    'ffprobe','-v','error','-show_entries','stream=codec_type,codec_name,width,height','-of','json',str(path)
+                  ],text=True,timeout=30)).get('streams') or []
+                  videos=[x for x in streams if x.get('codec_type')=='video']
+                  audios=[x for x in streams if x.get('codec_type')=='audio']
+                  assert videos and audios and size>10000,(platform,path,size,streams)
+                  results[platform]={
+                    'ok':True,'seconds':round(time.time()-started,2),'bytes':size,
+                    'video':videos[0],'audio':audios[0]
+                  }
+              finally:
+                  shutil.rmtree(work,ignore_errors=True)
+              print(platform,json.dumps(results[platform],ensure_ascii=False))
+          assert len(results)==3 and all(v['ok'] for v in results.values()),results
+          print('FINAL_RESULTS='+json.dumps(results,ensure_ascii=False))
           PY
