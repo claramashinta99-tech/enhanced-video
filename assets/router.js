@@ -18,7 +18,7 @@
     return p;
   };
   const setNav=(path)=>{
-    const a=document.querySelector('.nav-link');
+    const a=document.querySelector('.nav-right > .nav-link');
     if(!a)return;
     if(path==='/'){a.href='#tools';a.textContent='Tools';a.dataset.i18n='tools'}
     else{a.href='/';a.textContent='Homepage';a.dataset.i18n='home'}
@@ -90,6 +90,23 @@
   }
 
   document.documentElement.classList.remove('rvl-routing');
+
+  document.addEventListener('click',e=>{
+    const a=e.target.closest('.rvl-tools-panel a[href]');
+    if(!a)return;
+    const u=new URL(a.getAttribute('href'),location.href);
+    const path=pathOf(u);
+    if(u.origin!==location.origin||!ROUTES.has(path))return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    document.querySelector('.rvl-tools-wrap')?.classList.remove('open');
+    if(path==='/youtube-mp3/'||document.body.dataset.platform==='youtube-mp3'){
+      location.assign(u.href);
+      return;
+    }
+    navigate(u.href);
+  },true);
+
   document.addEventListener('click',e=>{
     if(e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;
     const a=e.target.closest('a[href]');
