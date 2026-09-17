@@ -3,6 +3,12 @@
   function install(){
     const navRight=document.querySelector('.nav-right');if(!navRight)return;
     navRight.querySelectorAll('.rvl-tools-wrap').forEach(el=>el.remove());
+    if(!document.querySelector('#rvl-back-link-size')){
+      const style=document.createElement('style');
+      style.id='rvl-back-link-size';
+      style.textContent='.back-row .text-link{font-size:14px!important;font-weight:600;line-height:1.5}';
+      document.head.appendChild(style);
+    }
     const music=navRight.querySelector('.music-toggle');
     if(music){
       music.classList.remove('rvl-music-text');
