@@ -19,85 +19,81 @@ jobs:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: backend/requirements.txt
-      - name: Install backend dependencies
-        run: pip install -r backend/requirements.txt
-      - name: Probe raw TikTok aweme source and play endpoints
+      - name: Install ffmpeg and backend dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          pip install -r backend/requirements.txt
+      - name: Recover TikTok internal URI and probe source play endpoints
         working-directory: backend
         env:
           TEST_URL: https://www.tiktok.com/@azzorml13/video/7682277583664336136?is_from_webapp=1&sender_device=pc
         run: |
           python - <<'PY'
-          import json, os, tempfile, urllib.parse
+          import json, os, re, tempfile, urllib.parse
           from pathlib import Path
           from curl_cffi import requests as crequests
           from yt_dlp import YoutubeDL
-          from yt_dlp.extractor.tiktok import TikTokIE
-          from yt_dlp.utils import urlencode_postdata
           import tiktok_engine_app as t
 
           url=os.environ['TEST_URL']
-          aweme_id=t._video_id(url)
-          assert aweme_id
+          info=t._extract_native_info(url, force_app=True)
+          formats=t._hd_candidates(info)
+          assert formats
+          print('video_id=',info.get('id'))
+          print('candidate_count=',len(formats))
+          for f in formats[:8]:
+              print('format=',json.dumps({
+                  'id':f.get('format_id'),'width':f.get('width'),'height':f.get('height'),
+                  'fps':f.get('fps'),'tbr':f.get('tbr'),'filesize':f.get('filesize') or f.get('filesize_approx'),
+                  'vcodec':f.get('vcodec'),'acodec':f.get('acodec')},ensure_ascii=False))
 
-          # Fetch the same raw app-API object yt-dlp parses, so we can read
-          # the real play_addr URI instead of guessing it from signed CDN URLs.
-          opts=t._tiktok_opts(url, True)
-          with YoutubeDL(opts) as ydl:
+          # Let yt-dlp itself download the best exposed app format; unlike raw
+          # urllib it preserves the request behavior TikTok expects.
+          with tempfile.TemporaryDirectory() as d:
+              opts=t._tiktok_opts(url,True)
+              opts.update({
+                  'format':formats[0]['format_id'],
+                  'outtmpl':str(Path(d)/'%(id)s.%(ext)s'),
+                  'quiet':False,'no_warnings':False,'retries':1,'fragment_retries':1,
+              })
+              with YoutubeDL(opts) as y:
+                  y.download([url])
+              files=[x for x in Path(d).iterdir() if x.is_file()]
+              assert files
+              source=max(files,key=lambda x:x.stat().st_size)
+              print('downloaded=',source.name,source.stat().st_size)
+              print('downloaded_probe=',json.dumps(t._probe(source),ensure_ascii=False))
+              blob=source.read_bytes()
+              # TikTok MP4s commonly carry e.g. "vid:v1c044g..." in metadata.
+              matches=[]
+              for pat in (
+                  rb'vid:([A-Za-z0-9_-]{12,120})',
+                  rb'video_id[=:]([A-Za-z0-9_-]{12,120})',
+              ):
+                  for m in re.finditer(pat,blob):
+                      value=m.group(1).decode('ascii','ignore').rstrip('_-')
+                      if value and value not in matches:
+                          matches.append(value)
+              print('binary_internal_uris=',matches)
+              # Also dump nearby printable metadata when the exact regex misses.
+              if not matches:
+                  text=''.join(chr(b) if 32<=b<127 else '\n' for b in blob)
+                  for line in text.splitlines():
+                      if 'vid:' in line.lower() or 'video_id' in line.lower():
+                          print('binary_hint=',line[:500])
+              assert matches,'could not recover TikTok internal video URI from downloaded MP4'
+              uris=matches[:4]
+
+          # The old public play API increasingly requires the full app identity.
+          # Reuse the device/app fields that yt-dlp generates for TikTok.
+          from yt_dlp.extractor.tiktok import TikTokIE
+          with YoutubeDL(t._tiktok_opts(url,True)) as ydl:
               ie=TikTokIE(ydl)
-              raw=ie._call_api('multi/aweme/detail', aweme_id, data=urlencode_postdata({
-                  'aweme_ids': f'[{aweme_id}]',
-                  'request_source': '0',
-              }), headers={'X-Argus': ''})
-              detail=(raw.get('aweme_details') or [None])[0] or {}
-              video=detail.get('video') or {}
-              print('aweme_id=', detail.get('aweme_id'))
-              print('video_dimensions=', video.get('width'), video.get('height'))
-              print('video_keys=', sorted(video.keys()))
-
-              uris=[]
-              def add_addr(name, addr):
-                  if not isinstance(addr, dict):
-                      return
-                  uri=addr.get('uri')
-                  urls=addr.get('url_list') or []
-                  if uri and uri not in uris:
-                      uris.append(uri)
-                  print('raw_addr=', json.dumps({
-                      'name':name,
-                      'uri':uri,
-                      'data_size':addr.get('data_size'),
-                      'width':addr.get('width'),
-                      'height':addr.get('height'),
-                      'url_hosts':[urllib.parse.urlparse(x).hostname for x in urls[:3]],
-                  }, ensure_ascii=False))
-
-              for k in ('play_addr','play_addr_h264','play_addr_bytevc1','download_addr','download_addr_h264'):
-                  add_addr(k, video.get(k))
-              for i,b in enumerate(video.get('bit_rate') or []):
-                  addr=b.get('play_addr') or {}
-                  add_addr(f'bit_rate[{i}]/{b.get("gear_name")}', addr)
-                  print('raw_bitrate=', json.dumps({
-                      'gear_name':b.get('gear_name'),
-                      'bit_rate':b.get('bit_rate'),
-                      'quality_type':b.get('quality_type'),
-                      'is_bytevc1':b.get('is_bytevc1'),
-                      'is_h265':b.get('is_h265'),
-                      'fps':b.get('FPS') or b.get('fps'),
-                      'width':addr.get('width'),
-                      'height':addr.get('height'),
-                      'uri':addr.get('uri'),
-                  }, ensure_ascii=False))
-              print('real_internal_uris=', uris)
-              assert uris, 'raw aweme metadata did not expose a play URI'
-
-              # Build the full mobile-app query/cookies identity exactly like
-              # yt-dlp. The bare /play request returns HTTP 400 on new TikTok.
-              app_query_base=ie._build_api_query({})
+              ie._get_next_app_info()
+              base=ie._build_api_query({})
               app_ua=ie._APP_USER_AGENT
               api_host=ie._API_HOSTNAME
-
-          print('api_host=', api_host)
-          print('app_ua=', app_ua)
 
           endpoints=[
               f'https://{api_host}/aweme/v1/play/',
@@ -105,54 +101,39 @@ jobs:
               'https://aweme.snssdk.com/aweme/v1/play/',
           ]
           headers={'User-Agent':app_ua,'Accept':'*/*'}
-          best=[]
-          for uri in uris[:5]:
+          candidates=[]
+          for uri in uris:
               for endpoint in endpoints:
                   for ratio in ('1080p','default','720p'):
-                      q=dict(app_query_base)
+                      q=dict(base)
                       q.update({
-                          'video_id':uri,
-                          'vr_type':'0',
-                          'is_play_url':'1',
-                          'source':'PackSourceEnum_FEED',
-                          'media_type':'4',
-                          'ratio':ratio,
-                          'line':'0',
-                          'improve_bitrate':'1',
+                          'video_id':uri,'vr_type':'0','is_play_url':'1',
+                          'source':'PackSourceEnum_FEED','media_type':'4',
+                          'ratio':ratio,'line':'0','improve_bitrate':'1',
                       })
                       try:
-                          r=crequests.get(endpoint,params=q,headers=headers,impersonate='chrome',allow_redirects=True,timeout=30)
+                          r=crequests.get(endpoint,params=q,headers=headers,impersonate='chrome',allow_redirects=True,timeout=35)
                           ct=(r.headers.get('content-type') or '').lower()
-                          row={
-                              'uri':uri,
-                              'endpoint':endpoint,
-                              'ratio':ratio,
-                              'status':r.status_code,
-                              'final_host':urllib.parse.urlparse(r.url).hostname,
-                              'content_type':ct,
-                              'content_length':r.headers.get('content-length'),
-                              'body_len':len(r.content),
-                              'head':r.content[:12].hex(),
-                          }
+                          row={'uri':uri,'endpoint':endpoint,'ratio':ratio,'status':r.status_code,
+                               'final_host':urllib.parse.urlparse(r.url).hostname,'content_type':ct,
+                               'content_length':r.headers.get('content-length'),'body_len':len(r.content),
+                               'head':r.content[:12].hex()}
                           print('play_probe=',json.dumps(row,ensure_ascii=False))
                           is_mp4=len(r.content)>100000 and (r.content[4:8]==b'ftyp' or 'video' in ct or 'octet-stream' in ct)
                           if r.status_code==200 and is_mp4:
                               with tempfile.NamedTemporaryFile(suffix='.mp4',delete=False) as tmp:
                                   tmp.write(r.content); p=Path(tmp.name)
-                              probe=t._probe(p)
-                              row['probe']=probe
-                              row['file_size']=p.stat().st_size
+                              row['probe']=t._probe(p); row['file_size']=p.stat().st_size
                               print('play_candidate_probe=',json.dumps(row,ensure_ascii=False))
-                              best.append(row)
-                              p.unlink(missing_ok=True)
+                              candidates.append(row); p.unlink(missing_ok=True)
                       except Exception as e:
-                          print('play_probe_failed=',uri,endpoint,ratio,type(e).__name__,str(e)[-300:])
+                          print('play_probe_failed=',uri,endpoint,ratio,type(e).__name__,str(e)[-250:])
 
-          print('play_candidates_found=',len(best))
-          if best:
+          print('play_candidates_found=',len(candidates))
+          if candidates:
               def rank(x):
                   v=(x.get('probe') or {}).get('video') or {}
-                  return (min(v.get('width') or 0,v.get('height') or 0), v.get('fps') or 0, (x.get('probe') or {}).get('bit_rate') or 0, x.get('file_size') or 0)
-              winner=max(best,key=rank)
-              print('BEST_PLAY_SOURCE=',json.dumps(winner,ensure_ascii=False))
+                  w,h=v.get('width') or 0,v.get('height') or 0
+                  return (min(w,h),v.get('fps') or 0,(x.get('probe') or {}).get('bit_rate') or 0,x.get('file_size') or 0)
+              print('BEST_PLAY_SOURCE=',json.dumps(max(candidates,key=rank),ensure_ascii=False))
           PY
