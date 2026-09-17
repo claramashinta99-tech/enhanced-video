@@ -90,23 +90,6 @@
   }
 
   document.documentElement.classList.remove('rvl-routing');
-
-  document.addEventListener('click',e=>{
-    const a=e.target.closest('.rvl-tools-panel a[href]');
-    if(!a)return;
-    const u=new URL(a.getAttribute('href'),location.href);
-    const path=pathOf(u);
-    if(u.origin!==location.origin||!ROUTES.has(path))return;
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    document.querySelector('.rvl-tools-wrap')?.classList.remove('open');
-    if(path==='/youtube-mp3/'||document.body.dataset.platform==='youtube-mp3'){
-      location.assign(u.href);
-      return;
-    }
-    navigate(u.href);
-  },true);
-
   document.addEventListener('click',e=>{
     if(e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;
     const a=e.target.closest('a[href]');
@@ -116,6 +99,7 @@
     const u=new URL(raw,location.href);
     const path=pathOf(u);
     if(u.origin!==location.origin||!ROUTES.has(path))return;
+    if(path==='/youtube-mp3/'||document.body.dataset.platform==='youtube-mp3')return;
     if(path===pathOf(location.href)&&u.hash)return;
     e.preventDefault();
     navigate(u.href);
