@@ -14,28 +14,25 @@ jobs:
       RENDER: https://rvl-api.onrender.com
       VIDEO: https://www.youtube.com/watch?v=Xh7I5J8eDQY
     steps:
-      - name: E2E Render MP3
+      - name: E2E Render generic audio
         shell: bash
         run: |
           set -euo pipefail
-          echo '=== MP3 INFO ==='
-          curl -fsS --max-time 100 -H 'Content-Type: application/json' -d "{\"url\":\"$VIDEO\"}" "$RENDER/api/mp3/info" | tee /tmp/mp3-info.json
+          curl -fsS --max-time 100 -H 'Content-Type: application/json' -d "{\"url\":\"$VIDEO\"}" "$RENDER/api/info" >/tmp/info.json
+          curl -fsS --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$VIDEO\",\"quality\":\"audio\"}" "$RENDER/api/jobs" | tee /tmp/job.json
           echo
-          echo '=== MP3 JOB ==='
-          curl -fsS --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$VIDEO\",\"quality\":\"audio\"}" "$RENDER/api/mp3/jobs" | tee /tmp/mp3-job.json
-          echo
-          JOB=$(python -c 'import json; print(json.load(open("/tmp/mp3-job.json"))["job_id"])')
+          JOB=$(python -c 'import json; print(json.load(open("/tmp/job.json"))["job_id"])')
           READY=0
           for i in $(seq 1 180); do
             BODY=$(curl -fsS --max-time 30 "$RENDER/api/jobs/$JOB")
-            echo "mp3 $i $BODY"
+            echo "audio $i $BODY"
             STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
             if [ "$STATE" = ready ]; then READY=1; break; fi
             [ "$STATE" = error ] && exit 1
             sleep 1
           done
           [ "$READY" = 1 ]
-          curl -fsS -L --max-time 90 -r 0-65535 -o /tmp/mp3.bin "$RENDER/api/jobs/$JOB/file"
-          BYTES=$(wc -c < /tmp/mp3.bin)
-          echo "mp3 file_probe_bytes=$BYTES"
+          curl -fsS -L --max-time 90 -r 0-65535 -o /tmp/audio.bin "$RENDER/api/jobs/$JOB/file"
+          BYTES=$(wc -c < /tmp/audio.bin)
+          echo "audio file_probe_bytes=$BYTES"
           [ "$BYTES" -gt 10000 ]
