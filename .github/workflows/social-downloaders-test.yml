@@ -21,6 +21,8 @@ jobs:
           python-version: '3.12'
       - name: Install backend requirements
         run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
           python -m pip install -q --upgrade pip
           python -m pip install -q -r backend/requirements.txt
       - name: Compile isolated backend
@@ -61,6 +63,7 @@ jobs:
               try:
                   info=s.extract_social_info(url, platform)
                   formats=s._video_formats(info)
+                  choices=s.quality_choices(info)
                   results[platform]={
                       'ok': bool(formats),
                       'seconds': round(time.time()-started,2),
@@ -68,6 +71,7 @@ jobs:
                       'title': (info.get('title') or '')[:90],
                       'formats': len(formats),
                       'max_height': s.max_height(info),
+                      'choices': choices,
                       'direct': bool(info.get('_rvl_direct')),
                   }
               except Exception as exc:
@@ -91,30 +95,37 @@ jobs:
           import social_downloaders_app as s
 
           tests = {
-              'facebook': ('https://www.facebook.com/cnn/videos/10155529876156509/', '720'),
-              'instagram': ('https://www.instagram.com/reel/Chunk8-jurw/', '720'),
-              'x': ('https://x.com/MunTheShinobi/status/1600009574919962625', '720'),
+              'facebook': 'https://www.facebook.com/cnn/videos/10155529876156509/',
+              'instagram': 'https://www.instagram.com/reel/Chunk8-jurw/',
+              'x': 'https://x.com/MunTheShinobi/status/1600009574919962625',
           }
           results={}
-          for platform,(url,quality) in tests.items():
+          for platform,url in tests.items():
               work=tempfile.mkdtemp(prefix=f'rvl-test-{platform}-')
               started=time.time()
               try:
+                  info=s.extract_social_info(url, platform)
+                  choices=s.quality_choices(info)
+                  quality=next((x['id'] for x in choices if x['id'] != 'best'), 'best')
                   path=s.download_social_sync(url, platform, quality, work)
                   size=Path(path).stat().st_size
                   probe=subprocess.check_output([
-                      'ffprobe','-v','error','-select_streams','v:0',
-                      '-show_entries','stream=codec_name,width,height',
+                      'ffprobe','-v','error',
+                      '-show_entries','stream=codec_type,codec_name,width,height',
                       '-of','json',str(path)
                   ], text=True, timeout=30)
-                  video=json.loads(probe).get('streams') or []
-                  assert video and size > 10000, (path,size,probe)
+                  streams=json.loads(probe).get('streams') or []
+                  videos=[x for x in streams if x.get('codec_type')=='video']
+                  audios=[x for x in streams if x.get('codec_type')=='audio']
+                  assert videos and audios and size > 10000, (path,size,probe)
                   results[platform]={
                       'ok': True,
                       'seconds': round(time.time()-started,2),
+                      'quality': quality,
                       'bytes': size,
                       'file': Path(path).name,
-                      'video': video[0],
+                      'video': videos[0],
+                      'audio': audios[0],
                   }
               except Exception as exc:
                   results[platform]={
