@@ -18,9 +18,10 @@
   $('#rvl-download-frame')?.remove();
   const frame=document.createElement('iframe');frame.id='rvl-download-frame';frame.name='rvl-download-frame';frame.style.display='none';document.body.appendChild(frame);
   let progress=$('#rvl-job-progress');
-  if(!progress){progress=document.createElement('div');progress.id='rvl-job-progress';progress.className='rvl-job-progress';progress.innerHTML='<div class="rvl-job-head"><strong id="rvl-job-stage">Menyiapkan</strong><span id="rvl-job-percent">0%</span></div><div class="rvl-job-track"><div class="rvl-job-fill" id="rvl-job-fill"></div></div>';card.insertAdjacentElement('afterend',progress)}
+  if(!progress){progress=document.createElement('div');progress.id='rvl-job-progress';progress.className='rvl-job-progress';progress.innerHTML='<div class="rvl-job-head"><strong id="rvl-job-stage">Lagi diproses…</strong><span id="rvl-job-percent">0%</span></div><div class="rvl-job-track"><div class="rvl-job-fill" id="rvl-job-fill"></div></div>';card.insertAdjacentElement('afterend',progress)}
   const stage=$('#rvl-job-stage'),pct=$('#rvl-job-percent'),fill=$('#rvl-job-fill');
-  const setProgress=(n=0,label='',ind=false)=>{const p=Math.max(0,Math.min(100,Math.round(Number(n)||0)));progress.classList.add('show');progress.classList.toggle('indeterminate',ind);fill.style.width=`${p}%`;pct.textContent=ind?'':`${p}%`;stage.textContent=label||t('Menyiapkan','Preparing')};
+  const guessStage=(n=0)=>{const p=Math.max(0,Math.min(100,Math.round(Number(n)||0)));if(p<18)return t('Lagi ngambil audionya…','Getting the audio…');if(p<42)return t('Sedang diracik…','Working on it…');if(p<68)return t('Masih diproses…','Still working…');if(p<90)return t('Hampir jadi…','Almost there…');return t('Sedikit lagi…','Just a little more…')};
+  const setProgress=(n=0,label='',ind=false)=>{const p=Math.max(0,Math.min(100,Math.round(Number(n)||0)));progress.classList.add('show');progress.classList.toggle('indeterminate',ind);fill.style.width=`${p}%`;pct.textContent=ind?'':`${p}%`;stage.textContent=label||guessStage(p)};
   const hideProgress=()=>{progress.classList.remove('show','indeterminate');fill.style.width='0%';pct.textContent='0%'};
   const updateMode=()=>{if(!current)return;const bits=[];if(current.uploader)bits.push(current.uploader);bits.push(mode.value==='fast'?t('Audio Asli','Original Audio'):'MP3 · 192 kbps');meta.textContent=bits.join(' · ');downloadBtn.textContent=mode.value==='fast'?t('Download Audio','Download Audio'):'Download MP3'};
   const reset=()=>{current=null;card.classList.remove('show');downloadBtn.disabled=true;thumb?.removeAttribute('src');if(title)title.textContent='';if(meta)meta.textContent='';hideProgress()};
@@ -29,7 +30,7 @@
     const url=input.value.trim(),run=++inspectRun;++downloadRun;
     inspectController?.abort();inspectController=new AbortController();reset();setStatus('');
     if(!valid(url)){setStatus(t('Tempel link YouTube yang valid.','Paste a valid YouTube link.'),'error');return}
-    inspectBtn.disabled=true;input.disabled=true;setProgress(20,t('Mengecek link','Checking link'),true);
+    inspectBtn.disabled=true;input.disabled=true;setProgress(20,t('Lagi ngecek link…','Checking the link…'),true);
     try{
       const r=await fetch(`${API}/api/mp3/info`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url}),signal:inspectController.signal,cache:'no-store'});
       const data=await r.json().catch(()=>({}));if(run!==inspectRun)return;if(!r.ok)throw new Error(data.detail||t('Link nggak bisa dibaca.','Could not read this link.'));
@@ -41,8 +42,8 @@
     while(run===downloadRun){
       await sleep(650);
       const r=await fetch(`${API}/api/jobs/${encodeURIComponent(job)}?_=${Date.now()}`,{cache:'no-store'});const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok)throw new Error(data.detail||t('Proses MP3 gagal.','MP3 process failed.'));
-      setProgress(data.progress||0,data.stage||t('Menyiapkan MP3','Preparing MP3'));
-      if(data.state==='ready'){setProgress(100,t('Selesai','Done'));frame.src=`${API}/api/jobs/${encodeURIComponent(job)}/file?_=${Date.now()}`;downloadBtn.disabled=false;setTimeout(()=>{if(run===downloadRun)hideProgress()},1600);return}
+      setProgress(data.progress||0,guessStage(data.progress||0));
+      if(data.state==='ready'){setProgress(100,t('Sip, beres!','Done!'));frame.src=`${API}/api/jobs/${encodeURIComponent(job)}/file?_=${Date.now()}`;downloadBtn.disabled=false;setTimeout(()=>{if(run===downloadRun)hideProgress()},1600);return}
       if(data.state==='error')throw new Error(data.error||t('Proses MP3 gagal.','MP3 process failed.'));
     }
   }
@@ -50,11 +51,11 @@
     if(!current)return;const run=++downloadRun;downloadBtn.disabled=true;setStatus('');
     try{
       if(mode.value==='fast'){
-        setProgress(15,t('Menyiapkan audio','Preparing audio'),true);
+        setProgress(15,t('Lagi ngambil audionya…','Getting the audio…'),true);
         const r=await fetch(`${API}/api/audio/prepare`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url}),cache:'no-store'});const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok||!data.token)throw new Error(data.detail||t('Audio gagal disiapkan.','Could not prepare audio.'));
-        setProgress(100,t('Download dimulai','Download started'));frame.src=`${API}/api/audio/chunked/${encodeURIComponent(data.token)}?_=${Date.now()}`;setTimeout(()=>{if(run===downloadRun)hideProgress()},1200);
+        setProgress(100,t('Sip, mulai didownload…','Nice, download starting…'));frame.src=`${API}/api/audio/chunked/${encodeURIComponent(data.token)}?_=${Date.now()}`;setTimeout(()=>{if(run===downloadRun)hideProgress()},1200);
       }else{
-        setProgress(5,t('Menyiapkan MP3 di Railway','Preparing MP3 on Railway'));
+        setProgress(5,guessStage(5));
         const r=await fetch(`${API}/api/mp3/jobs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url,quality:'audio'}),cache:'no-store'});const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok||!data.job_id)throw new Error(data.detail||t('Gagal memulai MP3.','Could not start MP3 processing.'));
         await poll(data.job_id,run);
       }
