@@ -81,3 +81,51 @@ jobs:
           if not all(v.get('ok') for v in results.values()):
               raise SystemExit(2)
           PY
+      - name: End to end download all three
+        env:
+          PYTHONPATH: backend
+        run: |
+          python - <<'PY'
+          import json, shutil, subprocess, tempfile, time
+          from pathlib import Path
+          import social_downloaders_app as s
+
+          tests = {
+              'facebook': ('https://www.facebook.com/cnn/videos/10155529876156509/', '720'),
+              'instagram': ('https://www.instagram.com/reel/Chunk8-jurw/', '720'),
+              'x': ('https://x.com/MunTheShinobi/status/1600009574919962625', '720'),
+          }
+          results={}
+          for platform,(url,quality) in tests.items():
+              work=tempfile.mkdtemp(prefix=f'rvl-test-{platform}-')
+              started=time.time()
+              try:
+                  path=s.download_social_sync(url, platform, quality, work)
+                  size=Path(path).stat().st_size
+                  probe=subprocess.check_output([
+                      'ffprobe','-v','error','-select_streams','v:0',
+                      '-show_entries','stream=codec_name,width,height',
+                      '-of','json',str(path)
+                  ], text=True, timeout=30)
+                  video=json.loads(probe).get('streams') or []
+                  assert video and size > 10000, (path,size,probe)
+                  results[platform]={
+                      'ok': True,
+                      'seconds': round(time.time()-started,2),
+                      'bytes': size,
+                      'file': Path(path).name,
+                      'video': video[0],
+                  }
+              except Exception as exc:
+                  results[platform]={
+                      'ok': False,
+                      'seconds': round(time.time()-started,2),
+                      'error': f'{type(exc).__name__}: {str(exc)}'[-500:],
+                  }
+              finally:
+                  shutil.rmtree(work, ignore_errors=True)
+              print(platform, json.dumps(results[platform], ensure_ascii=False))
+          print('DOWNLOAD_RESULTS=' + json.dumps(results, ensure_ascii=False))
+          if not all(v.get('ok') for v in results.values()):
+              raise SystemExit(3)
+          PY
