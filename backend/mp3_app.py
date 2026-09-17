@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -16,9 +17,12 @@ from fastapi.responses import StreamingResponse
 from yt_dlp.utils import DownloadError
 
 app=legacy.app
-legacy.APP_VERSION='1.12.8';app.version=legacy.APP_VERSION
+legacy.APP_VERSION='1.12.9';app.version=legacy.APP_VERSION
 MP3_SOURCE_TTL=600;MP3_PREP_WAIT=18;AUDIO_TOKEN_TTL=180;AUDIO_STREAM_CONCURRENCY=4
+FINAL_MP3_TTL=21600;FINAL_MP3_MAX=24;FINAL_MP3_WAIT=22
+FINAL_MP3_DIR=Path(tempfile.gettempdir())/'rvl-final-mp3-cache'
 _mp3_source_lock=threading.Lock();_mp3_sources={};_audio_token_lock=threading.Lock();_audio_tokens={};_audio_stream_slots=threading.BoundedSemaphore(AUDIO_STREAM_CONCURRENCY)
+_final_mp3_lock=threading.Lock();_final_mp3={}
 
 def youtube_id(url):
  p=urllib.parse.urlparse(url);h=(p.hostname or '').lower()
@@ -62,13 +66,10 @@ def _audio_source_from_info(info):
  return max(candidates,key=lambda x:x[0])[1] if candidates else None
 
 def _mp3_attempts():
- attempts=list(legacy.youtube_attempts())
- ranked=[]
+ attempts=list(legacy.youtube_attempts());ranked=[]
  if legacy.youtube_cookie_ready():
-  for name in ('mweb-cookie','default-cookie','safari-cookie','default-embedded-cookie'):
-   ranked.extend(s for s in attempts if s.get('name')==name and s not in ranked)
- ranked.extend(s for s in attempts if s not in ranked)
- return ranked
+  for name in ('mweb-cookie','default-cookie','safari-cookie','default-embedded-cookie'):ranked.extend(s for s in attempts if s.get('name')==name and s not in ranked)
+ ranked.extend(s for s in attempts if s not in ranked);return ranked
 
 def _prepare_audio_source_sync(url):
  started=time.monotonic();errors=[]
@@ -153,8 +154,60 @@ def fast_mp3_sync(url,workdir,job_id=None):
  if job_id:legacy.job_update(job_id,state='working',progress=8,stage='Menyiapkan audio')
  try:return _transcode_direct(_wait_source(url),workdir,job_id)
  except Exception as exc:
-  print(f'mp3 direct path fallback type={type(exc).__name__}',flush=True)
-  return _download_mp3_fallback(url,workdir,job_id)
+  print(f'mp3 direct path fallback type={type(exc).__name__}',flush=True);return _download_mp3_fallback(url,workdir,job_id)
+
+def _purge_final_mp3():
+ now=time.time();remove=[]
+ with _final_mp3_lock:
+  for key,state in list(_final_mp3.items()):
+   if now-state.get('updated',state.get('created',now))>FINAL_MP3_TTL:
+    _final_mp3.pop(key,None);remove.append(state.get('path'))
+  if len(_final_mp3)>FINAL_MP3_MAX:
+   ordered=sorted(_final_mp3.items(),key=lambda kv:kv[1].get('updated',0))
+   for key,state in ordered[:len(_final_mp3)-FINAL_MP3_MAX]:_final_mp3.pop(key,None);remove.append(state.get('path'))
+ for path in remove:
+  try:
+   if path:Path(path).unlink(missing_ok=True)
+  except OSError:pass
+
+def _get_final_mp3(url,create=False):
+ _purge_final_mp3();key=youtube_id(url) or uuid.uuid5(uuid.NAMESPACE_URL,url).hex
+ with _final_mp3_lock:
+  state=_final_mp3.get(key)
+  if state or not create:return state,False
+  cache_path=FINAL_MP3_DIR/f'{key}.mp3'
+  if cache_path.is_file() and time.time()-cache_path.stat().st_mtime<FINAL_MP3_TTL:
+   state={'state':'ready','event':threading.Event(),'created':cache_path.stat().st_mtime,'updated':time.time(),'path':str(cache_path),'filename':f'{key}.mp3','error':None};state['event'].set();_final_mp3[key]=state;return state,False
+  state={'state':'preparing','event':threading.Event(),'created':time.time(),'updated':time.time(),'path':None,'filename':None,'error':None};_final_mp3[key]=state;return state,True
+
+def _final_mp3_worker(url,state):
+ workdir=tempfile.mkdtemp(prefix='rvl-mp3-prewarm-')
+ try:
+  path=fast_mp3_sync(url,workdir,None)
+  if not path.is_file() or path.stat().st_size<=1024:raise RuntimeError('prewarm output missing')
+  FINAL_MP3_DIR.mkdir(parents=True,exist_ok=True);key=youtube_id(url) or uuid.uuid5(uuid.NAMESPACE_URL,url).hex;dest=FINAL_MP3_DIR/f'{key}.mp3';tmp=FINAL_MP3_DIR/f'.{key}.{uuid.uuid4().hex}.tmp';shutil.copy2(path,tmp);tmp.replace(dest)
+  with _final_mp3_lock:state.update(state='ready',path=str(dest),filename=path.name,updated=time.time(),error=None)
+  print(f'mp3 final cache ready id={key} bytes={dest.stat().st_size}',flush=True)
+ except Exception as exc:
+  with _final_mp3_lock:state.update(state='error',error=exc,updated=time.time())
+  print(f'mp3 final cache failed type={type(exc).__name__}',flush=True)
+ finally:
+  state['event'].set();legacy.cleanup(workdir)
+
+def _ensure_final_mp3(url):
+ state,created=_get_final_mp3(url,True)
+ if created:threading.Thread(target=_final_mp3_worker,args=(url,state),daemon=True).start()
+ return state
+
+def _copy_final_mp3(url,workdir,job_id=None,wait=0):
+ state=_ensure_final_mp3(url)
+ if state.get('state')=='preparing' and wait:state['event'].wait(wait)
+ if state.get('state')!='ready' or not state.get('path'):return None
+ src=Path(state['path'])
+ if not src.is_file() or src.stat().st_size<=1024:return None
+ legacy.clear_workdir(workdir);name=state.get('filename') or f'{youtube_id(url) or "youtube-audio"}.mp3';dest=Path(workdir)/name;shutil.copy2(src,dest)
+ if job_id:legacy.job_update(job_id,state='working',progress=98,stage='Finalisasi')
+ return dest
 
 def _purge_audio_tokens():
  cutoff=time.time()-AUDIO_TOKEN_TTL
@@ -179,7 +232,10 @@ async def run_mp3_job(job_id,url):
  with legacy._jobs_lock:job=legacy._jobs.get(job_id);workdir=job.get('workdir') if job else None
  if not workdir:return
  try:
-  async with legacy.DOWNLOAD_SLOTS:path=await asyncio.to_thread(fast_mp3_sync,url,workdir,job_id)
+  cached=await asyncio.to_thread(_copy_final_mp3,url,workdir,job_id,FINAL_MP3_WAIT)
+  if cached:path=cached
+  else:
+   async with legacy.DOWNLOAD_SLOTS:path=await asyncio.to_thread(fast_mp3_sync,url,workdir,job_id)
   legacy.job_update(job_id,state='ready',progress=100,stage='Siap',filename=path.name,path=str(path))
  except DownloadError:
   legacy.job_update(job_id,state='error',progress=0,stage='Gagal',error='Sumber audio YouTube belum tersedia. Coba lagi.')
@@ -190,7 +246,7 @@ async def run_mp3_job(job_id,url):
 async def mp3_info(body:legacy.URLBody):
  url=legacy.validate_url(body.url)
  if not legacy.is_youtube(url):raise HTTPException(400,'Link harus dari YouTube.')
- _ensure_source_prepare(url);meta=await asyncio.to_thread(mp3_meta_sync,url);return {'platform':'youtube-mp3','id':meta.get('id'),'title':meta.get('title') or 'YouTube audio','thumbnail':meta.get('thumbnail'),'uploader':meta.get('uploader'),'format':'MP3','bitrate':192,'audio_prepare':'background','fast_audio':True}
+ _ensure_source_prepare(url);_ensure_final_mp3(url);meta=await asyncio.to_thread(mp3_meta_sync,url);return {'platform':'youtube-mp3','id':meta.get('id'),'title':meta.get('title') or 'YouTube audio','thumbnail':meta.get('thumbnail'),'uploader':meta.get('uploader'),'format':'MP3','bitrate':192,'audio_prepare':'background','fast_audio':True,'final_cache':'prewarm'}
 @app.post('/api/audio/prepare')
 async def prepare_fast_audio(body:legacy.URLBody):
  _purge_audio_tokens();url=legacy.validate_url(body.url)
@@ -213,6 +269,6 @@ async def stream_fast_audio(token:str):
 async def create_mp3_job(body:legacy.DownloadBody):
  legacy.purge_jobs();url=legacy.validate_url(body.url)
  if not legacy.is_youtube(url):raise HTTPException(400,'Link harus dari YouTube.')
- job_id=uuid.uuid4().hex;workdir=tempfile.mkdtemp(prefix='rvl-mp3-')
+ _ensure_final_mp3(url);job_id=uuid.uuid4().hex;workdir=tempfile.mkdtemp(prefix='rvl-mp3-')
  with legacy._jobs_lock:legacy._jobs[job_id]={'state':'queued','progress':0,'stage':'Antri','created':time.time(),'updated':time.time(),'workdir':workdir,'path':None,'filename':None,'error':None}
  asyncio.create_task(run_mp3_job(job_id,url));return {'job_id':job_id,'state':'queued'}
