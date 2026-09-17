@@ -1,0 +1,40 @@
+name: Home Tools visibility smoke
+
+on:
+  push:
+    branches: [ui-home-tools-hide-test]
+    paths:
+      - 'assets/home.js'
+      - 'index.html'
+      - '.github/workflows/home-tools-visibility-smoke.yml'
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax check
+        run: node --check assets/home.js
+      - name: Add computed-style probes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          probe = '''<script>window.addEventListener('load',()=>setTimeout(()=>{const w=document.querySelector('.rvl-tools-wrap');document.body.dataset.toolsDisplay=w?getComputedStyle(w).display:'missing'},250));</script>'''
+          for name in ['index.html','clarity/index.html']:
+              p=Path(name)
+              s=p.read_text()
+              p.write_text(s.replace('</body>', probe+'</body>'))
+          PY
+      - name: Serve branch
+        run: |
+          python3 -m http.server 8765 >/tmp/rvl-home-tools-http.log 2>&1 &
+          sleep 1
+      - name: Verify homepage hidden and tool page visible
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$CHROME"
+          timeout 20s "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --mute-audio --virtual-time-budget=1800 --dump-dom http://127.0.0.1:8765/ > /tmp/home.html
+          timeout 20s "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --mute-audio --virtual-time-budget=1800 --dump-dom http://127.0.0.1:8765/clarity/ > /tmp/clarity.html
+          grep -q 'data-tools-display="none"' /tmp/home.html
+          grep -q 'data-tools-display="inline-flex"' /tmp/clarity.html
