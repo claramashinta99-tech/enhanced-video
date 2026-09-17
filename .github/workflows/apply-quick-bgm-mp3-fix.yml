@@ -1,0 +1,351 @@
+name: Apply quick BGM and MP3 fix
+
+on:
+  push:
+    branches: [quick-bgm-mp3-fix]
+    paths:
+      - '.github/workflows/apply-quick-bgm-mp3-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Patch router and MP3 frontend
+        shell: bash
+        run: |
+          cat > assets/router.js <<'EOF'
+          (()=>{
+            const ROUTES=new Set(['/','/clarity/','/tiktok-downloader/','/youtube-downloader/','/youtube-shorts/','/youtube-mp3/']);
+            let navigating=false;
+
+            function routePath(url){
+              const u=new URL(url,location.href);
+              let p=u.pathname;
+              if(!p.endsWith('/')&&!p.split('/').pop().includes('.'))p+='/';
+              return p;
+            }
+            function isInternalRoute(url){
+              const u=new URL(url,location.href);
+              return u.origin===location.origin&&ROUTES.has(routePath(u));
+            }
+            function setNavForPath(path){
+              const link=document.querySelector('.nav-link');
+              if(!link)return;
+              if(path==='/'){
+                link.href='#tools';link.textContent='Tools';link.dataset.i18n='tools';
+              }else{
+                link.href='/';link.textContent='Homepage';link.dataset.i18n='home';
+              }
+            }
+            function replaceStaticFooter(doc){
+              document.querySelectorAll('.footer').forEach(el=>el.parentElement?.remove());
+              const target=doc.querySelector('.footer');
+              if(!target)return;
+              const holder=target.parentElement?.cloneNode(true);
+              if(!holder)return;
+              const credit=document.querySelector('.rvl-credit');
+              document.body.insertBefore(holder,credit||null);
+            }
+            function replaceToast(doc){
+              document.querySelector('#toast')?.remove();
+              const toast=doc.querySelector('#toast');
+              if(!toast)return;
+              const credit=document.querySelector('.rvl-credit');
+              document.body.insertBefore(toast.cloneNode(true),credit||null);
+            }
+            function ensureHomeCss(){
+              if(document.querySelector('link[href*="/assets/home.css"]'))return;
+              const l=document.createElement('link');
+              l.rel='stylesheet';l.href='/assets/home.css?v=2';l.dataset.rvlHomeCss='1';
+              document.head.appendChild(l);
+            }
+            function loadRouteScript(path){
+              document.querySelectorAll('script[data-rvl-route-script]').forEach(s=>s.remove());
+              document.querySelector('#rvl-download-frame')?.remove();
+              let src=null,type=null;
+              if(path==='/'){ensureHomeCss();src='/assets/home.js'}
+              else if(path==='/clarity/'){src='/assets/clarity-route.js';type='module'}
+              else if(path==='/tiktok-downloader/'||path==='/youtube-downloader/'){src='/assets/downloader.js'}
+              else if(path==='/youtube-shorts/'){src='/assets/shorts.js'}
+              else if(path==='/youtube-mp3/'){src='/assets/mp3.js'}
+              if(!src)return;
+              const s=document.createElement('script');
+              s.dataset.rvlRouteScript='1';s.src=`${src}?route=${Date.now()}`;
+              if(type)s.type=type;
+              document.body.appendChild(s);
+            }
+            async function navigate(url,{push=true}={}){
+              const u=new URL(url,location.href);
+              const path=routePath(u);
+              if(!ROUTES.has(path)){location.href=u.href;return}
+              if(path===routePath(location.href)&&u.hash){document.querySelector(u.hash)?.scrollIntoView({behavior:'smooth'});return}
+              if(navigating)return;
+              navigating=true;
+              try{
+                if(typeof window.__RVL_ROUTE_CLEANUP__==='function'){
+                  try{window.__RVL_ROUTE_CLEANUP__()}catch{}
+                  window.__RVL_ROUTE_CLEANUP__=null;
+                }
+                const controller=new AbortController();
+                const timer=setTimeout(()=>controller.abort(),8000);
+                let res;
+                try{res=await fetch(u.pathname+u.search,{cache:'no-store',signal:controller.signal,headers:{'X-RVL-Route':'1'}})}
+                finally{clearTimeout(timer)}
+                if(!res.ok)throw new Error(`HTTP ${res.status}`);
+                const doc=new DOMParser().parseFromString(await res.text(),'text/html');
+                const nextMain=doc.querySelector('main');
+                const currentMain=document.querySelector('main');
+                if(!nextMain||!currentMain)throw new Error('Route layout missing');
+                currentMain.replaceWith(nextMain.cloneNode(true));
+                document.body.dataset.platform=doc.body.dataset.platform||'';
+                document.title=doc.title||'RVL';
+                const nextDesc=doc.querySelector('meta[name="description"]')?.content;
+                if(nextDesc){const meta=document.querySelector('meta[name="description"]');if(meta)meta.content=nextDesc}
+                replaceStaticFooter(doc);replaceToast(doc);setNavForPath(path);
+                if(push)history.pushState({rvl:true},'',u.pathname+u.search+u.hash);
+                if(typeof window.setLang==='function')window.setLang(localStorage.getItem('reyval-lang')||'id');
+                if(typeof window.applyBrand==='function')window.applyBrand();
+                loadRouteScript(path);
+                window.scrollTo(0,0);
+                window.dispatchEvent(new CustomEvent('rvl:route',{detail:{path}}));
+              }catch(err){
+                console.error('RVL route fallback',err);
+                location.href=u.href;
+              }finally{
+                navigating=false;
+                document.documentElement.classList.remove('rvl-routing');
+              }
+            }
+            document.documentElement.classList.remove('rvl-routing');
+            document.addEventListener('click',e=>{
+              if(e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;
+              const a=e.target.closest('a[href]');
+              if(!a||a.target==='_blank'||a.hasAttribute('download'))return;
+              const href=a.getAttribute('href');
+              if(!href||href.startsWith('mailto:')||href.startsWith('tel:'))return;
+              const u=new URL(href,location.href);
+              if(u.origin!==location.origin||!isInternalRoute(u))return;
+              if(routePath(u)===routePath(location.href)&&u.hash)return;
+              e.preventDefault();navigate(u.href);
+            });
+            window.addEventListener('popstate',()=>{
+              if(ROUTES.has(routePath(location.href)))navigate(location.href,{push:false});
+            });
+            window.RVLNavigate=navigate;
+          })();
+          EOF
+
+          cat > assets/mp3.js <<'EOF'
+          (()=>{
+            const RVL_API='https://enhanced-video-production.up.railway.app';
+            const qs=s=>document.querySelector(s);
+            const input=qs('#media-url');
+            const inspectBtn=qs('#inspect-btn');
+            const card=qs('#media-card');
+            const statusEl=qs('#download-status');
+            const thumb=qs('#media-thumb');
+            const titleEl=qs('#media-title');
+            const metaEl=qs('#media-meta');
+            const mode=qs('#audio-mode');
+            const downloadBtn=qs('#download-btn');
+            if(!input||!inspectBtn||!card||!statusEl||!mode||!downloadBtn)return;
+
+            let current=null;
+            let inspectRun=0;
+            let inspectController=null;
+            let downloadRun=0;
+
+            if(!document.querySelector('#rvl-mp3-style')){
+              const css=document.createElement('style');
+              css.id='rvl-mp3-style';
+              css.textContent=`
+                .media-card{display:none;margin-top:14px;border-top:1px solid var(--line);padding-top:16px}
+                .media-card.show{display:grid;grid-template-columns:132px 1fr;gap:14px}
+                .media-thumb{width:132px;aspect-ratio:16/10;object-fit:cover;border-radius:13px;background:#171717;border:1px solid var(--line)}
+                .media-info{min-width:0}.media-title{font-weight:700;font-size:14px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+                .media-meta{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.45}
+                .media-actions{display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:13px}
+                .audio-mode{width:100%;min-height:44px;border:1px solid #303030;background:#0a0a0a;color:#fff;border-radius:13px;padding:0 13px;font-size:13px;outline:none}
+                .download-status-text{margin-top:12px;font-size:11px;color:var(--muted);min-height:16px}.download-status-text:empty{display:none}.download-status-text.error{color:#ff9d9d}
+                .rvl-job-progress{display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+                .rvl-job-progress.show{display:block}.rvl-job-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;font-size:11px;color:#8d8d94}
+                .rvl-job-head strong{color:#c9c9ce;font-weight:600}.rvl-job-track{height:7px;border-radius:999px;background:#1a1a1d;overflow:hidden;border:1px solid rgba(255,255,255,.04)}
+                .rvl-job-fill{height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,#63c8ff,#8b7cff);box-shadow:0 0 16px rgba(139,124,255,.18);transition:width .22s ease}
+                .rvl-job-progress.indeterminate .rvl-job-fill{width:42%!important;animation:rvlJobIndeterminate 1.05s ease-in-out infinite alternate}
+                @keyframes rvlJobIndeterminate{from{transform:translateX(-40%)}to{transform:translateX(165%)}}
+                @media(max-width:600px){.media-card.show{grid-template-columns:92px 1fr}.media-thumb{width:92px}.media-actions{grid-template-columns:1fr}.download-input-wrap{grid-template-columns:1fr}}
+              `;
+              document.head.appendChild(css);
+            }
+
+            document.querySelector('#rvl-download-frame')?.remove();
+            const frame=document.createElement('iframe');
+            frame.name='rvl-download-frame';frame.id='rvl-download-frame';frame.style.display='none';document.body.appendChild(frame);
+
+            let progressWrap=qs('#rvl-job-progress');
+            if(!progressWrap){
+              progressWrap=document.createElement('div');progressWrap.id='rvl-job-progress';progressWrap.className='rvl-job-progress';
+              progressWrap.innerHTML='<div class="rvl-job-head"><strong id="rvl-job-stage">Menyiapkan</strong><span id="rvl-job-percent">0%</span></div><div class="rvl-job-track"><div class="rvl-job-fill" id="rvl-job-fill"></div></div>';
+              card.insertAdjacentElement('afterend',progressWrap);
+            }
+            const progressStage=qs('#rvl-job-stage');
+            const progressPct=qs('#rvl-job-percent');
+            const progressFill=qs('#rvl-job-fill');
+
+            const lang=()=>localStorage.getItem('reyval-lang')||'id';
+            const text=(id,en)=>lang()==='en'?en:id;
+            const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+            const valid=url=>{try{const h=new URL(url).hostname.toLowerCase();return /(^|\.)youtube\.com$/.test(h)||h==='youtu.be'}catch{return false}};
+            const setStatus=(msg='',type='')=>{statusEl.textContent=msg;statusEl.className='download-status-text'+(type?' '+type:'')};
+            function setProgress(value=0,stage='',opts={}){
+              const pct=Math.max(0,Math.min(100,Math.round(Number(value)||0)));
+              progressWrap.classList.add('show');progressWrap.classList.toggle('indeterminate',!!opts.indeterminate);
+              progressFill.style.width=`${pct}%`;progressPct.textContent=opts.indeterminate?'':`${pct}%`;progressStage.textContent=stage||text('Menyiapkan','Preparing');
+            }
+            function hideProgress(){progressWrap.classList.remove('show','indeterminate');progressFill.style.width='0%';progressPct.textContent='0%'}
+            function selectedFast(){return mode.value==='fast'}
+            function updateModeCopy(){
+              if(!current)return;
+              const bits=[];if(current.data.uploader)bits.push(current.data.uploader);
+              bits.push(selectedFast()?text('Audio Asli','Original Audio'):'MP3 · 192 kbps');
+              if(metaEl)metaEl.textContent=bits.join(' · ');
+              downloadBtn.textContent=selectedFast()?text('Download Audio','Download Audio'):'Download MP3';
+            }
+            function applyStaticCopy(){
+              const en=lang()==='en';const sub=qs('#page-sub');
+              if(sub)sub.textContent=en?'Paste a YouTube link, check the audio, then choose Original Audio or MP3 192 kbps.':'Tempel link YouTube, cek audionya, lalu pilih Audio Asli atau MP3 192 kbps.';
+              input.placeholder=en?'Paste YouTube link':'Tempel link YouTube';inspectBtn.textContent=en?'Check':'Cek';
+              const fastOpt=mode.querySelector('option[value="fast"]');const mp3Opt=mode.querySelector('option[value="mp3"]');
+              if(fastOpt)fastOpt.textContent=en?'Original Audio':'Audio Asli';
+              if(mp3Opt)mp3Opt.textContent='MP3 · 192 kbps';
+              if(!downloadBtn.disabled)updateModeCopy();
+            }
+            function reset(){
+              current=null;card.classList.remove('show');downloadBtn.disabled=true;thumb?.removeAttribute('src');
+              if(titleEl)titleEl.textContent='';if(metaEl)metaEl.textContent='';hideProgress();
+            }
+            async function inspect(){
+              const url=input.value.trim();const run=++inspectRun;++downloadRun;
+              if(inspectController)inspectController.abort();
+              inspectController=new AbortController();reset();setStatus('');
+              if(!valid(url)){setStatus(text('Tempel link YouTube yang valid.','Paste a valid YouTube link.'),'error');return}
+              inspectBtn.disabled=true;input.disabled=true;setProgress(25,text('Mengecek link','Checking link'),{indeterminate:true});
+              try{
+                const r=await fetch(`${RVL_API}/api/mp3/info`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url}),signal:inspectController.signal,cache:'no-store'});
+                const data=await r.json().catch(()=>({}));
+                if(run!==inspectRun)return;
+                if(!r.ok)throw new Error(data.detail||text('Link nggak bisa dibaca.','Could not read this link.'));
+                current={url,data};
+                if(thumb){thumb.src=data.thumbnail||'';thumb.alt=data.title||'Media thumbnail'}
+                if(titleEl)titleEl.textContent=data.title||'Untitled';
+                downloadBtn.disabled=false;card.classList.add('show');hideProgress();setStatus('');updateModeCopy();
+              }catch(e){
+                if(e.name==='AbortError'||run!==inspectRun)return;
+                console.error(e);reset();setStatus(e.message||text('Gagal mengecek link.','Failed to check link.'),'error');
+              }finally{
+                if(run===inspectRun){inspectBtn.disabled=false;input.disabled=false;inspectController=null}
+              }
+            }
+            async function pollJob(jobId,run){
+              while(run===downloadRun){
+                await sleep(700);
+                const r=await fetch(`${RVL_API}/api/jobs/${encodeURIComponent(jobId)}?_=${Date.now()}`,{cache:'no-store'});
+                const data=await r.json().catch(()=>({}));
+                if(run!==downloadRun)return;
+                if(!r.ok)throw new Error(data.detail||text('Proses MP3 gagal.','MP3 process failed.'));
+                setProgress(data.progress||0,data.stage||text('Menyiapkan MP3','Preparing MP3'));
+                if(data.state==='ready'){
+                  setProgress(100,text('Selesai','Done'));
+                  frame.src=`${RVL_API}/api/jobs/${encodeURIComponent(jobId)}/file?_=${Date.now()}`;
+                  downloadBtn.disabled=false;updateModeCopy();
+                  setTimeout(()=>{if(run===downloadRun)hideProgress()},1800);return;
+                }
+                if(data.state==='error')throw new Error(data.error||text('Proses MP3 gagal.','MP3 process failed.'));
+              }
+            }
+            async function downloadOriginal(run){
+              setProgress(15,text('Menyiapkan audio','Preparing audio'),{indeterminate:true});
+              const r=await fetch(`${RVL_API}/api/audio/prepare`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url}),cache:'no-store'});
+              const data=await r.json().catch(()=>({}));
+              if(run!==downloadRun)return;
+              if(!r.ok||!data.token)throw new Error(data.detail||text('Audio gagal disiapkan.','Could not prepare audio.'));
+              setProgress(100,text('Download dimulai','Download started'));
+              frame.src=`${RVL_API}/api/audio/chunked/${encodeURIComponent(data.token)}?_=${Date.now()}`;
+              downloadBtn.disabled=false;updateModeCopy();setTimeout(()=>{if(run===downloadRun)hideProgress()},1400);
+            }
+            async function downloadMp3(run){
+              setProgress(3,text('Menyiapkan MP3 di server','Preparing MP3 on server'));
+              const r=await fetch(`${RVL_API}/api/mp3/jobs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url,quality:'audio'}),cache:'no-store'});
+              const data=await r.json().catch(()=>({}));
+              if(run!==downloadRun)return;
+              if(!r.ok||!data.job_id)throw new Error(data.detail||text('Gagal memulai MP3.','Could not start MP3 processing.'));
+              await pollJob(data.job_id,run);
+            }
+            async function download(){
+              if(!current)return;
+              const run=++downloadRun;setStatus('');downloadBtn.disabled=true;downloadBtn.textContent=text('Proses…','Processing…');
+              try{if(selectedFast())await downloadOriginal(run);else await downloadMp3(run)}
+              catch(e){
+                if(run!==downloadRun)return;
+                console.error(e);hideProgress();setStatus(e.message||text('Download gagal.','Download failed.'),'error');downloadBtn.disabled=false;updateModeCopy();
+              }
+            }
+            function cleanup(){
+              ++inspectRun;++downloadRun;
+              if(inspectController){inspectController.abort();inspectController=null}
+              if(window.__rvlMp3LangHandler){window.removeEventListener('reyval:lang',window.__rvlMp3LangHandler);window.__rvlMp3LangHandler=null}
+            }
+            window.__RVL_ROUTE_CLEANUP__=cleanup;
+            if(window.__rvlMp3LangHandler)window.removeEventListener('reyval:lang',window.__rvlMp3LangHandler);
+            window.__rvlMp3LangHandler=applyStaticCopy;
+            window.addEventListener('reyval:lang',window.__rvlMp3LangHandler);
+            inspectBtn.addEventListener('click',inspect);
+            downloadBtn.addEventListener('click',download);
+            mode.addEventListener('change',updateModeCopy);
+            input.addEventListener('keydown',e=>{if(e.key==='Enter')inspect()});
+            input.addEventListener('input',()=>{if(current&&input.value.trim()!==current.url){++inspectRun;++downloadRun;if(inspectController)inspectController.abort();reset();setStatus('')}});
+            applyStaticCopy();
+          })();
+          EOF
+
+          python - <<'PY'
+          from pathlib import Path
+          pages=[
+              Path('index.html'), Path('clarity/index.html'), Path('tiktok-downloader/index.html'),
+              Path('youtube-downloader/index.html'), Path('youtube-shorts/index.html'), Path('youtube-mp3/index.html')
+          ]
+          for p in pages:
+              s=p.read_text()
+              s=s.replace('assets/router.js?v=6','assets/router.js?v=7')
+              p.write_text(s)
+          p=Path('youtube-mp3/index.html')
+          s=p.read_text().replace('assets/mp3.js?v=6','assets/mp3.js?v=7')
+          p.write_text(s)
+          PY
+
+      - name: Validate JavaScript and refs
+        shell: bash
+        run: |
+          node --check assets/router.js
+          node --check assets/mp3.js
+          grep -q 'router.js?v=7' index.html
+          grep -q 'router.js?v=7' youtube-mp3/index.html
+          grep -q 'mp3.js?v=7' youtube-mp3/index.html
+          ! grep -q 'mediabunny' assets/mp3.js
+
+      - name: Commit to main
+        shell: bash
+        run: |
+          git config user.name 'claramashinta99-tech'
+          git config user.email 'claramashinta99@gmail.com'
+          git add assets/router.js assets/mp3.js index.html clarity/index.html tiktok-downloader/index.html youtube-downloader/index.html youtube-shorts/index.html youtube-mp3/index.html
+          git commit -m 'Fix continuous BGM navigation and MP3 tab freeze'
+          git push origin HEAD:main
