@@ -1,0 +1,62 @@
+name: TikTok source probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - backend/tiktok_engine_app.py
+      - .github/workflows/tiktok-source-probe.yml
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Probe TikTok app bitrate ladder and download top source
+        working-directory: backend
+        env:
+          TEST_URL: https://www.tiktok.com/@azzorml13/video/7682277583664336136?is_from_webapp=1&sender_device=pc
+        run: |
+          python - <<'PY'
+          import json, os, tempfile
+          from pathlib import Path
+          import tiktok_engine_app as t
+
+          url=os.environ['TEST_URL']
+          info=t._extract_native_info(url, force_app=True)
+          formats=t._hd_candidates(info)
+          print('video_id=', info.get('id'))
+          print('source=', info.get('_rvl_tiktok_source'))
+          print('candidate_count=', len(formats))
+          for f in formats[:12]:
+              print(json.dumps({
+                  'id': f.get('format_id'),
+                  'width': f.get('width'),
+                  'height': f.get('height'),
+                  'fps': f.get('fps'),
+                  'tbr': f.get('tbr'),
+                  'vbr': f.get('vbr'),
+                  'filesize': f.get('filesize') or f.get('filesize_approx'),
+                  'vcodec': f.get('vcodec'),
+                  'acodec': f.get('acodec'),
+                  'rank': t._rank(f),
+              }, ensure_ascii=False))
+          assert formats, 'no playable TikTok formats found'
+          with tempfile.TemporaryDirectory() as d:
+              path=t._download_native_hd(url, Path(d))
+              probe=t._probe(path)
+              print('selected_file=', path.name)
+              print('selected_probe=', json.dumps(probe, ensure_ascii=False))
+              assert probe.get('video', {}).get('width')
+              assert probe.get('video', {}).get('height')
+              assert probe.get('has_audio') is True
+          PY
