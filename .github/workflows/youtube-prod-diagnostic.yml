@@ -9,32 +9,55 @@ on:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     env:
       API: https://enhanced-video-production.up.railway.app
       VIDEO: https://www.youtube.com/watch?v=Xh7I5J8eDQY
+      SHORT: https://www.youtube.com/shorts/n1n8pX1pfOU
+      UA: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36 EdgA/144.0.0.0
     steps:
-      - name: Health and engine
+      - name: Confirm direct Railway block
         shell: bash
         run: |
-          set -x
+          set -euo pipefail
           curl -fsS --max-time 30 "$API/health" || true
           echo
-          curl -fsS --max-time 30 "$API/api/youtube/engine" || true
-          echo
-          curl -fsS --max-time 30 "$API/api/youtube/nettest" || true
-          echo
-      - name: Strategy selftests
-        shell: bash
-        run: |
-          set -x
-          for s in mweb-pot-public default-public embedded-public android-vr-public visionos-studio-skip visionos-music-skip visionos-mobile-skip visionos-nocookie-skip visionos-googleapis-skip; do
-            echo "===== $s ====="
-            curl -fsS --max-time 35 "$API/api/youtube/selftest/$s" || true
-            echo
-          done
-      - name: Info request
-        shell: bash
-        run: |
-          set -x
           curl -i -sS --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$VIDEO\"}" "$API/api/info" || true
+          echo
+      - name: Probe cnv external fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, urllib.parse, urllib.request, time
+
+          ua='Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36 EdgA/144.0.0.0'
+          base_headers={'User-Agent':ua,'Accept':'*/*','Origin':'https://iframe.y2meta-uk.com','Referer':'https://iframe.y2meta-uk.com/'}
+          def req(url, data=None, headers=None, timeout=60):
+              h=dict(base_headers); h.update(headers or {})
+              r=urllib.request.Request(url,data=data,headers=h,method='POST' if data is not None else 'GET')
+              with urllib.request.urlopen(r,timeout=timeout) as x:
+                  return x.status,x.headers, x.read().decode('utf-8','replace')
+          st,_,raw=req('https://cnv.cx/v2/sanity/key',timeout=20)
+          print('key_status',st)
+          key=json.loads(raw).get('key')
+          print('key_present',bool(key))
+          assert key
+          links=['https://www.youtube.com/watch?v=Xh7I5J8eDQY','https://www.youtube.com/shorts/n1n8pX1pfOU']
+          tests=[('mp3','192'),('mp4','720'),('mp4','1080'),('mp4','2160')]
+          for link in links:
+              for fmt,q in tests:
+                  body=urllib.parse.urlencode({'link':link,'format':fmt,'audioBitrate':'192','videoQuality':q,'filenameStyle':'pretty','vCodec':'h264'}).encode()
+                  try:
+                      s,_,out=req('https://cnv.cx/v2/converter',body,{'key':key,'Content-Type':'application/x-www-form-urlencoded'},90)
+                      data=json.loads(out)
+                      url=data.get('url')
+                      print('convert',link.split('/')[-1],fmt,q,'status',s,'has_url',bool(url),'filename',data.get('filename'),'error',data.get('error') or data.get('message'))
+                      if url:
+                          rr=urllib.request.Request(url,headers={'User-Agent':ua,'Range':'bytes=0-65535','Accept':'*/*'})
+                          with urllib.request.urlopen(rr,timeout=35) as r:
+                              chunk=r.read(65536)
+                              print('file_probe',fmt,q,'http',r.status,'bytes',len(chunk),'type',r.headers.get('Content-Type'),'length',r.headers.get('Content-Length'),'range',r.headers.get('Content-Range'))
+                  except Exception as e:
+                      print('convert_fail',link.split('/')[-1],fmt,q,type(e).__name__,str(e)[:300])
+          PY
