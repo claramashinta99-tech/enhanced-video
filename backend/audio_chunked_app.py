@@ -13,16 +13,16 @@ from fastapi.responses import StreamingResponse
 
 app = base.app
 legacy = base.legacy
-legacy.APP_VERSION = '1.13.2'
+legacy.APP_VERSION = '1.13.3'
 app.version = legacy.APP_VERSION
 
 # Preserve the MP3 module's own fallback before this module replaces the fast path.
 _ORIGINAL_FAST_MP3_SYNC = base.fast_mp3_sync
 
-# YouTube/GoogleVideo throttles large/open-ended media requests. Keep every
-# upstream request comfortably below the ~10 MiB limit documented by yt-dlp.
-UPSTREAM_CHUNK = int(os.getenv('YOUTUBE_HTTP_CHUNK', str(4 * 1024 * 1024)))
-READ_CHUNK = 256 * 1024
+# Use larger range/read chunks to reduce request and Python loop overhead while
+# staying below the upstream range size that previously caused throttling.
+UPSTREAM_CHUNK = int(os.getenv('YOUTUBE_HTTP_CHUNK', str(8 * 1024 * 1024)))
+READ_CHUNK = 512 * 1024
 UPSTREAM_RETRIES = 2
 
 
@@ -203,7 +203,7 @@ def _convert_local_to_mp3(source_path, source_data, workdir, job_id=None):
         '-i', str(source_path),
         '-vn', '-map', '0:a:0?',
         '-c:a', 'libmp3lame', '-b:a', '192k', '-compression_level', '0',
-        '-threads', '1', '-progress', 'pipe:1', '-nostats', str(output),
+        '-progress', 'pipe:1', '-nostats', str(output),
     ]
     if job_id:
         legacy.job_update(job_id, state='working', progress=58, stage='Convert MP3')
