@@ -85,6 +85,37 @@ jobs:
           if not all(v.get('ok') for v in results.values()):
               raise SystemExit(2)
           PY
+      - name: Diagnose Instagram audio sources
+        env:
+          PYTHONPATH: backend
+        run: |
+          python - <<'PY'
+          import json, shutil, subprocess, tempfile
+          from pathlib import Path
+          import social_downloaders_app as s
+
+          url='https://www.instagram.com/reel/Chunk8-jurw/'
+          info=s.extract_social_info(url, 'instagram')
+          fields=('format_id','ext','width','height','vcodec','acodec','protocol','audio_ext','format_note','filesize','filesize_approx')
+          print('INSTAGRAM_FORMATS_BEGIN')
+          for f in info.get('formats') or []:
+              print(json.dumps({k:f.get(k) for k in fields}, ensure_ascii=False, sort_keys=True))
+          print('INSTAGRAM_FORMATS_END')
+          print('top_ext=',info.get('ext'),'top_vcodec=',info.get('vcodec'),'top_acodec=',info.get('acodec'),'format_id=',info.get('format_id'))
+
+          work=tempfile.mkdtemp(prefix='rvl-ig-fallback-')
+          try:
+              try:
+                  fb=s._instagram_fallback(url)
+                  print('FALLBACK_FORMATS=',json.dumps([{k:f.get(k) for k in fields} for f in fb.get('formats') or []], ensure_ascii=False))
+                  path=s._direct_download(fb,'best',work)
+                  print('FALLBACK_FILE=',str(path),'bytes=',Path(path).stat().st_size)
+                  print(subprocess.check_output(['ffprobe','-v','error','-show_entries','stream=codec_type,codec_name,width,height','-of','json',str(path)],text=True,timeout=30))
+              except Exception as exc:
+                  print('FALLBACK_ERROR=',type(exc).__name__,str(exc))
+          finally:
+              shutil.rmtree(work,ignore_errors=True)
+          PY
       - name: End to end download all three
         env:
           PYTHONPATH: backend
