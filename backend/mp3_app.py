@@ -13,11 +13,12 @@ from pathlib import Path
 
 import app as legacy
 from fastapi import HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from starlette.background import BackgroundTask
 from yt_dlp.utils import DownloadError
 
 app=legacy.app
-legacy.APP_VERSION='1.12.9';app.version=legacy.APP_VERSION
+legacy.APP_VERSION='1.12.10';app.version=legacy.APP_VERSION
 MP3_SOURCE_TTL=600;MP3_PREP_WAIT=18;AUDIO_TOKEN_TTL=180;AUDIO_STREAM_CONCURRENCY=4
 FINAL_MP3_TTL=21600;FINAL_MP3_MAX=24;FINAL_MP3_WAIT=22
 FINAL_MP3_DIR=Path(tempfile.gettempdir())/'rvl-final-mp3-cache'
@@ -209,6 +210,60 @@ def _copy_final_mp3(url,workdir,job_id=None,wait=0):
  if job_id:legacy.job_update(job_id,state='working',progress=98,stage='Finalisasi')
  return dest
 
+def _reyval_filename(name):
+ p=Path(str(name or 'download'));stem=p.stem.strip() or 'download';suffix=p.suffix
+ if stem.lower().endswith('reyval tools'):return f'{stem}{suffix}'
+ return f'{stem} - reyval tools{suffix}'
+
+def _estimate_format_bytes(fmt,duration=0):
+ if not isinstance(fmt,dict):return 0
+ size=legacy.format_size(fmt)
+ if size:return size
+ try:tbr=float(fmt.get('tbr') or fmt.get('abr') or fmt.get('vbr') or 0);dur=float(duration or fmt.get('duration') or 0)
+ except (TypeError,ValueError):return 0
+ return int(tbr*1000*dur/8) if tbr>0 and dur>0 else 0
+
+def _best_video_bytes(info):
+ if not isinstance(info,dict):return 0
+ duration=info.get('duration') or 0;videos=[];audios=[]
+ for f in info.get('formats') or []:
+  if not isinstance(f,dict):continue
+  v=str(f.get('vcodec') or '').lower();a=str(f.get('acodec') or '').lower()
+  if v and v!='none':videos.append(f)
+  elif a and a!='none':audios.append(f)
+ if not videos:return 0
+ def vrank(f):
+  try:return (int(f.get('height') or 0),int(f.get('width') or 0),float(f.get('fps') or 0),float(f.get('tbr') or f.get('vbr') or 0),_estimate_format_bytes(f,duration))
+  except (TypeError,ValueError):return (0,0,0,0,0)
+ best=max(videos,key=vrank);total=_estimate_format_bytes(best,duration)
+ if str(best.get('acodec') or '').lower() in {'','none'} and audios:
+  def arank(f):
+   try:return (float(f.get('abr') or f.get('tbr') or 0),_estimate_format_bytes(f,duration))
+   except (TypeError,ValueError):return (0,0)
+  total+=_estimate_format_bytes(max(audios,key=arank),duration)
+ return total
+
+def _estimate_download_bytes(url,quality):
+ q=str(quality or 'best').lower().strip()
+ if legacy.is_youtube(url) and q in {'audio','mp3','fast'}:
+  if q in {'audio','mp3'}:
+   final,_=_get_final_mp3(url,False)
+   if final and final.get('state')=='ready' and final.get('path'):
+    p=Path(final['path'])
+    if p.is_file():return p.stat().st_size,True
+  source_state,_=_get_source_state(url,False)
+  if source_state and source_state.get('state')=='ready' and source_state.get('source'):
+   source_data=source_state['source'];duration=float(source_data.get('duration') or 0);source=source_data.get('source') or {}
+   if q=='fast':
+    size=_estimate_format_bytes(source,duration);return size,False
+   if duration>0:return int(duration*192000/8*1.01),False
+  return 0,False
+ cached=legacy.cache_get(url);info=(cached or {}).get('info') if cached else None
+ if not isinstance(info,dict):return 0,False
+ if legacy.is_youtube(url) and q in getattr(legacy,'EXACT_QUALITIES',{}):
+  size=legacy.estimated_quality_size(info,q);return size,False
+ return _best_video_bytes(info),False
+
 def _purge_audio_tokens():
  cutoff=time.time()-AUDIO_TOKEN_TTL
  with _audio_token_lock:
@@ -247,15 +302,25 @@ async def mp3_info(body:legacy.URLBody):
  url=legacy.validate_url(body.url)
  if not legacy.is_youtube(url):raise HTTPException(400,'Link harus dari YouTube.')
  _ensure_source_prepare(url);_ensure_final_mp3(url);meta=await asyncio.to_thread(mp3_meta_sync,url);return {'platform':'youtube-mp3','id':meta.get('id'),'title':meta.get('title') or 'YouTube audio','thumbnail':meta.get('thumbnail'),'uploader':meta.get('uploader'),'format':'MP3','bitrate':192,'audio_prepare':'background','fast_audio':True,'final_cache':'prewarm'}
+
+@app.post('/api/file-size')
+async def file_size(body:legacy.DownloadBody):
+ url=legacy.validate_url(body.url);quality=str(body.quality or 'best').lower().strip()
+ try:size,exact=await asyncio.to_thread(_estimate_download_bytes,url,quality)
+ except Exception as exc:
+  print(f'file size lookup failed type={type(exc).__name__}',flush=True);size=0;exact=False
+ return {'bytes':int(size) if size else None,'estimated':bool(size and not exact),'exact':bool(size and exact),'ready':bool(size)}
+
 @app.post('/api/audio/prepare')
 async def prepare_fast_audio(body:legacy.URLBody):
  _purge_audio_tokens();url=legacy.validate_url(body.url)
  if not legacy.is_youtube(url):raise HTTPException(400,'Link harus dari YouTube.')
  try:source_data=await asyncio.to_thread(_wait_source,url)
  except Exception as exc:raise HTTPException(422,'Audio YouTube belum berhasil disiapkan dari server. Coba lagi sebentar.') from exc
- source=source_data['source'];ext=_audio_ext(source);title=_safe_title(source_data.get('title'));token=uuid.uuid4().hex
- with _audio_token_lock:_audio_tokens[token]={'created':time.time(),'source':source,'filename':f'{title}.{ext}','media_type':_audio_media_type(ext)}
- return {'token':token,'filename':f'{title}.{ext}','media_type':_audio_media_type(ext),'strategy':source_data.get('strategy')}
+ source=source_data['source'];ext=_audio_ext(source);title=_safe_title(source_data.get('title'));filename=_reyval_filename(f'{title}.{ext}');token=uuid.uuid4().hex
+ with _audio_token_lock:_audio_tokens[token]={'created':time.time(),'source':source,'filename':filename,'media_type':_audio_media_type(ext)}
+ return {'token':token,'filename':filename,'media_type':_audio_media_type(ext),'strategy':source_data.get('strategy')}
+
 @app.get('/api/audio/stream/{token}')
 async def stream_fast_audio(token:str):
  _purge_audio_tokens()
@@ -265,6 +330,7 @@ async def stream_fast_audio(token:str):
  try:response=await asyncio.to_thread(_open_audio_source,item['source'])
  except Exception as exc:_audio_stream_slots.release();raise HTTPException(502,'Sumber audio YouTube tidak bisa dibuka.') from exc
  return StreamingResponse(_audio_iter(response),media_type=item['media_type'],headers={'Content-Disposition':f'attachment; filename="{item["filename"]}"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+
 @app.post('/api/mp3/jobs')
 async def create_mp3_job(body:legacy.DownloadBody):
  legacy.purge_jobs();url=legacy.validate_url(body.url)
@@ -272,3 +338,14 @@ async def create_mp3_job(body:legacy.DownloadBody):
  _ensure_final_mp3(url);job_id=uuid.uuid4().hex;workdir=tempfile.mkdtemp(prefix='rvl-mp3-')
  with legacy._jobs_lock:legacy._jobs[job_id]={'state':'queued','progress':0,'stage':'Antri','created':time.time(),'updated':time.time(),'workdir':workdir,'path':None,'filename':None,'error':None}
  asyncio.create_task(run_mp3_job(job_id,url));return {'job_id':job_id,'state':'queued'}
+
+@app.get('/api/jobs/{job_id}/file-reyval')
+async def get_reyval_job_file(job_id:str):
+ with legacy._jobs_lock:
+  job=legacy._jobs.get(job_id)
+  if not job:raise HTTPException(404,'Job tidak ditemukan atau sudah kedaluwarsa.')
+  if job.get('state')!='ready' or not job.get('path'):raise HTTPException(409,'File belum siap.')
+  path=Path(job['path']);filename=_reyval_filename(job.get('filename') or path.name)
+ if not path.is_file():legacy.remove_job(job_id);raise HTTPException(410,'File sudah tidak tersedia.')
+ media='audio/mpeg' if path.suffix.lower()=='.mp3' else 'video/mp4' if path.suffix.lower() in {'.mp4','.mov','.m4v'} else 'application/octet-stream'
+ return FileResponse(str(path),filename=filename,media_type=media,headers={'Cache-Control':'no-store'},background=BackgroundTask(legacy.remove_job,job_id))
