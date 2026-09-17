@@ -24,18 +24,78 @@ function installSiteBgm(){
   const btn=document.createElement('button');
   btn.type='button';btn.className='music-toggle';btn.setAttribute('aria-label','Toggle background music');btn.innerHTML='<span class="bars"><i></i><i></i><i></i></span>';
   const navRight=document.querySelector('.nav-right');if(navRight)navRight.insertBefore(btn,navRight.firstChild);
+
+  const STATE_KEY='rvl-bgm-state-v2';
   const pref=localStorage.getItem('rvl-bgm-enabled');
   let enabled=pref!=='0';
-  const stored=Number(sessionStorage.getItem('rvl-bgm-time')||0);
+  const readState=()=>{
+    try{return JSON.parse(sessionStorage.getItem(STATE_KEY)||'{}')||{}}catch{return {}}
+  };
+  const previous=readState();
+  const legacyTime=Number(sessionStorage.getItem('rvl-bgm-time')||0);
+  const hasPreviousTime=Number.isFinite(Number(previous.time))||Number.isFinite(legacyTime)&&legacyTime>0;
+  const shouldResume=previous.playing===true;
   const syncButton=()=>btn.classList.toggle('off',!enabled);
   syncButton();
-  audio.addEventListener('loadedmetadata',()=>{if(Number.isFinite(stored)&&stored>0&&audio.duration)audio.currentTime=stored%audio.duration},{once:true});
-  const saveTime=()=>{if(Number.isFinite(audio.currentTime))sessionStorage.setItem('rvl-bgm-time',String(audio.currentTime))};
-  setInterval(saveTime,1000);window.addEventListener('beforeunload',saveTime);document.addEventListener('visibilitychange',()=>{if(document.hidden)saveTime()});
-  const tryPlay=()=>{if(!enabled)return;audio.play().catch(()=>{})};
-  const firstGesture=()=>{tryPlay();window.removeEventListener('pointerdown',firstGesture,true);window.removeEventListener('keydown',firstGesture,true)};
-  window.addEventListener('pointerdown',firstGesture,true);window.addEventListener('keydown',firstGesture,true);
-  btn.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();enabled=!enabled;localStorage.setItem('rvl-bgm-enabled',enabled?'1':'0');syncButton();if(enabled)tryPlay();else audio.pause()});
+
+  const currentTime=()=>Number.isFinite(audio.currentTime)?audio.currentTime:0;
+  const saveState=(playing=!audio.paused)=>{
+    const time=currentTime();
+    sessionStorage.setItem('rvl-bgm-time',String(time));
+    sessionStorage.setItem(STATE_KEY,JSON.stringify({time,stamp:Date.now(),playing:enabled&&playing}));
+  };
+  const tryPlay=()=>{
+    if(!enabled)return Promise.resolve();
+    const result=audio.play();
+    if(result&&typeof result.then==='function')return result.then(()=>saveState(true)).catch(()=>{});
+    saveState(true);return Promise.resolve();
+  };
+  const restorePosition=()=>{
+    if(!audio.duration)return;
+    let time=Number(previous.time);
+    if(!Number.isFinite(time))time=legacyTime;
+    if(!Number.isFinite(time)||time<0)time=0;
+    const stamp=Number(previous.stamp)||0;
+    if(shouldResume&&stamp>0){
+      const elapsed=Math.max(0,Math.min(30,(Date.now()-stamp)/1000));
+      time+=elapsed;
+    }
+    if(hasPreviousTime&&time>0)audio.currentTime=time%audio.duration;
+    if(shouldResume)tryPlay();
+  };
+  if(audio.readyState>=1)restorePosition();
+  else audio.addEventListener('loadedmetadata',restorePosition,{once:true});
+
+  const firstGesture=()=>{
+    tryPlay();
+    window.removeEventListener('pointerdown',firstGesture,true);
+    window.removeEventListener('keydown',firstGesture,true);
+  };
+  window.addEventListener('pointerdown',firstGesture,true);
+  window.addEventListener('keydown',firstGesture,true);
+
+  document.addEventListener('click',e=>{
+    const a=e.target.closest&&e.target.closest('a[href]');
+    if(!a||a.target==='_blank'||a.hasAttribute('download'))return;
+    try{
+      const u=new URL(a.href,location.href);
+      if(u.origin===location.origin)saveState(!audio.paused);
+    }catch{}
+  },true);
+  window.addEventListener('pagehide',()=>saveState(!audio.paused));
+  window.addEventListener('beforeunload',()=>saveState(!audio.paused));
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)saveState(!audio.paused)});
+  window.addEventListener('pageshow',()=>{if(enabled&&shouldResume&&audio.paused)tryPlay()});
+  setInterval(()=>saveState(!audio.paused),1000);
+
+  btn.addEventListener('click',e=>{
+    e.preventDefault();e.stopPropagation();
+    enabled=!enabled;
+    localStorage.setItem('rvl-bgm-enabled',enabled?'1':'0');
+    syncButton();
+    if(enabled)tryPlay();
+    else{saveState(false);audio.pause()}
+  });
 }
 
 function installModernUI(){
