@@ -126,9 +126,9 @@ def _base_opts(platform, *, quality='best', workdir=None, job_id=None):
             except (TypeError, ValueError):
                 height = None
         if height:
-            opts['format'] = f'bv*[height<={height}]+ba/b[height<={height}]'
+            opts['format'] = f'best[height={height}][ext=mp4]/best[height={height}]/best[height<={height}]'
         else:
-            opts['format'] = 'bv*+ba/b'
+            opts['format'] = 'best[ext=mp4]/best'
         opts['outtmpl'] = str(Path(workdir) / '%(title).80B [%(id)s].%(ext)s')
         opts['merge_output_format'] = 'mp4'
         if job_id:
@@ -372,8 +372,13 @@ def _video_formats(info):
     return formats
 
 
+def _combined_video_formats(info):
+    return [fmt for fmt in _video_formats(info) if fmt.get('acodec') not in (None, 'none')]
+
+
 def quality_choices(info):
-    heights = sorted({_height(fmt) for fmt in _video_formats(info) if _height(fmt) > 0}, reverse=True)
+    combined = _combined_video_formats(info)
+    heights = sorted({_height(fmt) for fmt in combined if _height(fmt) > 0}, reverse=True)
     out = [{'id': 'best', 'label': 'Best quality'}]
     for height in heights[:5]:
         out.append({'id': str(height), 'label': f'{height}p'})
@@ -381,7 +386,8 @@ def quality_choices(info):
 
 
 def max_height(info):
-    return max((_height(fmt) for fmt in _video_formats(info)), default=0)
+    combined = _combined_video_formats(info) or _video_formats(info)
+    return max((_height(fmt) for fmt in combined), default=0)
 
 
 def _safe_name(value, fallback='video'):
@@ -400,7 +406,7 @@ def _direct_url_allowed(url):
 
 
 def _pick_direct_format(info, quality):
-    formats = _video_formats(info)
+    formats = _combined_video_formats(info) or _video_formats(info)
     if not formats:
         raise DownloadError('No direct video format')
     formats.sort(key=lambda fmt: (_height(fmt), int(fmt.get('filesize') or fmt.get('filesize_approx') or 0)), reverse=True)
@@ -410,6 +416,9 @@ def _pick_direct_format(info, quality):
         target = int(quality)
     except (TypeError, ValueError):
         return formats[0]
+    exact = [fmt for fmt in formats if _height(fmt) == target]
+    if exact:
+        return exact[0]
     eligible = [fmt for fmt in formats if _height(fmt) and _height(fmt) <= target]
     return eligible[0] if eligible else formats[-1]
 
