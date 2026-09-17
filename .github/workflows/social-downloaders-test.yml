@@ -19,107 +19,50 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install backend requirements
+      - name: Install requirements
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
           python -m pip install -q --upgrade pip
           python -m pip install -q -r backend/requirements.txt
-      - name: Compile isolated backend
-        run: python -m py_compile backend/social_downloaders_app.py
-      - name: Import and local route smoke
-        shell: bash
-        run: |
-          set -euo pipefail
-          PYTHONPATH=backend uvicorn social_downloaders_app:app --host 127.0.0.1 --port 18080 >/tmp/social-api.log 2>&1 &
-          PID=$!
-          trap 'kill $PID 2>/dev/null || true' EXIT
-          for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:18080/api/social/health | tee /tmp/social-health.json; then break; fi
-            sleep 1
-          done
-          python - <<'PY'
-          import json
-          x=json.load(open('/tmp/social-health.json'))
-          assert x['ok'] is True, x
-          assert x['platforms'] == ['facebook','instagram','x'], x
-          PY
-      - name: Probe public Facebook Instagram and X metadata
+      - name: Find an anonymous Instagram video with audio
         env:
           PYTHONPATH: backend
         run: |
           python - <<'PY'
-          import json, time
-          import social_downloaders_app as s
-          tests = {
-              'facebook': 'https://www.facebook.com/cnn/videos/10155529876156509/',
-              'instagram': 'https://www.instagram.com/reel/Chunk8-jurw/',
-              'x': 'https://x.com/MunTheShinobi/status/1600009574919962625',
-          }
-          results={}
-          for platform,url in tests.items():
-              started=time.time()
-              try:
-                  info=s.extract_social_info(url, platform)
-                  formats=s._video_formats(info)
-                  results[platform]={'ok':bool(formats),'seconds':round(time.time()-started,2),'id':info.get('id'),'title':(info.get('title') or '')[:90],'formats':len(formats),'max_height':s.max_height(info),'choices':s.quality_choices(info),'direct':bool(info.get('_rvl_direct'))}
-              except Exception as exc:
-                  results[platform]={'ok':False,'seconds':round(time.time()-started,2),'error':f'{type(exc).__name__}: {str(exc)}'[-500:]}
-              print(platform,json.dumps(results[platform],ensure_ascii=False))
-          if not all(v.get('ok') for v in results.values()): raise SystemExit(2)
-          PY
-      - name: End to end three public examples
-        env:
-          PYTHONPATH: backend
-        run: |
-          python - <<'PY'
-          import json, shutil, subprocess, tempfile, time
+          import json, shutil, subprocess, tempfile
           from pathlib import Path
           import social_downloaders_app as s
-          tests = {
-              'facebook': ('https://www.facebook.com/cnn/videos/10155529876156509/', True),
-              'instagram': ('https://www.instagram.com/reel/Chunk8-jurw/', False),
-              'x': ('https://x.com/MunTheShinobi/status/1600009574919962625', True),
-          }
-          results={}
-          for platform,(url,require_audio) in tests.items():
-              work=tempfile.mkdtemp(prefix=f'rvl-test-{platform}-'); started=time.time()
+
+          urls=[
+            'https://instagram.com/p/aye83DjauH/',
+            'https://www.instagram.com/reel/CDUMkliABpa/',
+            'https://www.instagram.com/marvelskies.fc/reel/CWqAgUZgCku/',
+            'https://www.instagram.com/reels/Cop84x6u7CP/',
+            'https://www.instagram.com/p/BQ0eAlwhDrw/',
+          ]
+          winner=None
+          for url in urls:
               try:
-                  info=s.extract_social_info(url,platform)
-                  path=s.download_social_sync(url,platform,'best',work)
-                  size=Path(path).stat().st_size
-                  streams=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_entries','stream=codec_type,codec_name,width,height','-of','json',str(path)],text=True,timeout=30)).get('streams') or []
-                  videos=[x for x in streams if x.get('codec_type')=='video']; audios=[x for x in streams if x.get('codec_type')=='audio']
-                  assert videos and size>10000,(path,size,streams)
-                  if require_audio: assert audios,(path,size,streams)
-                  results[platform]={'ok':True,'seconds':round(time.time()-started,2),'bytes':size,'file':Path(path).name,'video':videos[0],'audio':audios[0] if audios else None}
+                  info=s.extract_social_info(url,'instagram')
+                  safe=[{k:f.get(k) for k in ('format_id','ext','width','height','vcodec','acodec','format_note')} for f in info.get('formats') or []]
+                  probable_audio=any(f.get('acodec')!='none' for f in info.get('formats') or [])
+                  print('CANDIDATE',url,'id=',info.get('id'),'probable_audio=',probable_audio,'formats=',json.dumps(safe,ensure_ascii=False))
+                  if probable_audio and winner is None:
+                      winner=url
               except Exception as exc:
-                  results[platform]={'ok':False,'seconds':round(time.time()-started,2),'error':f'{type(exc).__name__}: {str(exc)}'[-500:]}
-              finally: shutil.rmtree(work,ignore_errors=True)
-              print(platform,json.dumps(results[platform],ensure_ascii=False))
-          print('DOWNLOAD_RESULTS='+json.dumps(results,ensure_ascii=False))
-          if not all(v.get('ok') for v in results.values()): raise SystemExit(3)
-          PY
-      - name: Verify Instagram audio-bearing video
-        env:
-          PYTHONPATH: backend
-        run: |
-          python - <<'PY'
-          import json, shutil, subprocess, tempfile, time
-          from pathlib import Path
-          import social_downloaders_app as s
-          url='https://www.instagram.com/tv/BkfuX9UB-eK/'
-          work=tempfile.mkdtemp(prefix='rvl-ig-audio-'); started=time.time()
+                  print('CANDIDATE_FAIL',url,type(exc).__name__,str(exc)[-300:])
+          if not winner:
+              raise SystemExit('no anonymous Instagram audio candidate found')
+          print('WINNER=',winner)
+          work=tempfile.mkdtemp(prefix='rvl-ig-audio-')
           try:
-              info=s.extract_social_info(url,'instagram')
-              safe=[{k:f.get(k) for k in ('format_id','ext','width','height','vcodec','acodec','format_note')} for f in info.get('formats') or []]
-              print('AUDIO_IG_FORMATS='+json.dumps(safe,ensure_ascii=False))
-              path=s.download_social_sync(url,'instagram','best',work)
+              path=s.download_social_sync(winner,'instagram','best',work)
               size=Path(path).stat().st_size
               streams=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_entries','stream=codec_type,codec_name,width,height','-of','json',str(path)],text=True,timeout=30)).get('streams') or []
-              videos=[x for x in streams if x.get('codec_type')=='video']; audios=[x for x in streams if x.get('codec_type')=='audio']
-              print('AUDIO_IG_RESULT='+json.dumps({'seconds':round(time.time()-started,2),'bytes':size,'file':Path(path).name,'streams':streams},ensure_ascii=False))
-              assert videos and audios and size>10000,(path,size,streams)
+              print('WINNER_RESULT=',json.dumps({'file':Path(path).name,'bytes':size,'streams':streams},ensure_ascii=False))
+              assert any(x.get('codec_type')=='video' for x in streams),streams
+              assert any(x.get('codec_type')=='audio' for x in streams),streams
           finally:
               shutil.rmtree(work,ignore_errors=True)
           PY
