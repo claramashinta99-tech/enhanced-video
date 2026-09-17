@@ -1,0 +1,40 @@
+name: YouTube production diagnostic
+
+on:
+  push:
+    paths:
+      - '.github/workflows/youtube-prod-diagnostic.yml'
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      API: https://enhanced-video-production.up.railway.app
+      VIDEO: https://www.youtube.com/watch?v=Xh7I5J8eDQY
+    steps:
+      - name: Health and engine
+        shell: bash
+        run: |
+          set -x
+          curl -fsS --max-time 30 "$API/health" || true
+          echo
+          curl -fsS --max-time 30 "$API/api/youtube/engine" || true
+          echo
+          curl -fsS --max-time 30 "$API/api/youtube/nettest" || true
+          echo
+      - name: Strategy selftests
+        shell: bash
+        run: |
+          set -x
+          for s in mweb-pot-public default-public embedded-public android-vr-public visionos-studio-skip visionos-music-skip visionos-mobile-skip visionos-nocookie-skip visionos-googleapis-skip; do
+            echo "===== $s ====="
+            curl -fsS --max-time 35 "$API/api/youtube/selftest/$s" || true
+            echo
+          done
+      - name: Info request
+        shell: bash
+        run: |
+          set -x
+          curl -i -sS --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$VIDEO\"}" "$API/api/info" || true
