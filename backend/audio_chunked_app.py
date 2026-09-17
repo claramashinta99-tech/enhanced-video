@@ -13,8 +13,11 @@ from fastapi.responses import StreamingResponse
 
 app = base.app
 legacy = base.legacy
-legacy.APP_VERSION = '1.13.0'
+legacy.APP_VERSION = '1.13.2'
 app.version = legacy.APP_VERSION
+
+# Preserve the MP3 module's own fallback before this module replaces the fast path.
+_ORIGINAL_FAST_MP3_SYNC = base.fast_mp3_sync
 
 # YouTube/GoogleVideo throttles large/open-ended media requests. Keep every
 # upstream request comfortably below the ~10 MiB limit documented by yt-dlp.
@@ -236,11 +239,15 @@ def _convert_local_to_mp3(source_path, source_data, workdir, job_id=None):
 def chunked_mp3_sync(url, workdir, job_id=None):
     if job_id:
         legacy.job_update(job_id, state='working', progress=8, stage='Menyiapkan audio')
-    source_data = base._wait_source(url)
-    source_path = _download_chunked_source(source_data, workdir, job_id)
-    return _convert_local_to_mp3(source_path, source_data, workdir, job_id)
+    try:
+        source_data = base._wait_source(url)
+        source_path = _download_chunked_source(source_data, workdir, job_id)
+        return _convert_local_to_mp3(source_path, source_data, workdir, job_id)
+    except Exception as exc:
+        print(f'mp3 chunked path fallback type={type(exc).__name__}', flush=True)
+        return _ORIGINAL_FAST_MP3_SYNC(url, workdir, job_id)
 
 
 # The job runner in mp3_app resolves this global at request time, so replacing
-# it keeps the existing API/UI while removing the throttled open-ended FFmpeg input.
+# it keeps the existing API/UI while retaining the original downloader as a fallback.
 base.fast_mp3_sync = chunked_mp3_sync
