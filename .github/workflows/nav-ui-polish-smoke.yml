@@ -1,0 +1,53 @@
+name: Nav UI polish smoke
+
+on:
+  push:
+    branches: [nav-ui-polish-test]
+    paths:
+      - 'assets/nav-ui.js'
+      - '.github/workflows/nav-ui-polish-smoke.yml'
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax check
+        run: node --check assets/nav-ui.js
+      - name: Serve branch
+        run: |
+          python3 -m http.server 8765 > /tmp/rvl-nav-http.log 2>&1 &
+          sleep 1
+      - name: Open every page without hang
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$CHROME"
+          pages=("" "clarity/" "tiktok-downloader/" "youtube-downloader/" "youtube-shorts/" "youtube-mp3/")
+          for page in "${pages[@]}"; do
+            slug="${page//\//-}"; slug="${slug:-home}"
+            timeout 20s "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --mute-audio --virtual-time-budget=1600 --dump-dom "http://127.0.0.1:8765/${page}" > "/tmp/${slug}.html"
+            grep -q '>Music<' "/tmp/${slug}.html"
+            grep -q '>Tools<' "/tmp/${slug}.html"
+            grep -q 'rvl-tools-panel' "/tmp/${slug}.html"
+            test "$(wc -c < "/tmp/${slug}.html")" -gt 500
+          done
+      - name: Verify polished style rules
+        run: |
+          grep -q 'background:#131c34!important' assets/nav-ui.js
+          grep -q 'body\[data-platform="youtube-mp3"\].*music-toggle' assets/nav-ui.js
+          grep -q 'background:#121212!important' assets/nav-ui.js
+          grep -q 'box-shadow:6px 6px 0 #070a14' assets/nav-ui.js
+      - name: Capture screenshots
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          timeout 20s "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --mute-audio --virtual-time-budget=1800 --window-size=1365,768 --screenshot=/tmp/mp3.png http://127.0.0.1:8765/youtube-mp3/
+          timeout 20s "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --mute-audio --virtual-time-budget=1800 --window-size=1365,768 --screenshot=/tmp/clarity.png http://127.0.0.1:8765/clarity/
+          test -s /tmp/mp3.png
+          test -s /tmp/clarity.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nav-ui-screenshots
+          path: |
+            /tmp/mp3.png
+            /tmp/clarity.png
