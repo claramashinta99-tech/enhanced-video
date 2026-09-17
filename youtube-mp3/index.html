@@ -7,12 +7,36 @@
   <meta name="description" content="YouTube MP3 Downloader — RVL.">
   <title>YouTube MP3 Downloader — RVL</title>
   <link rel="stylesheet" href="../assets/styles.css">
+  <style>
+    body[data-platform="youtube-mp3"] .nav-right{gap:10px}
+    .mp3-music,.mp3-tools>summary{height:34px;min-width:58px;padding:0 12px;border:1px solid #303030;border-radius:9px;background:#121212;color:#d8d8d8;font:650 12px Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;list-style:none;box-sizing:border-box}
+    .mp3-music.off{color:#666}.mp3-music:hover,.mp3-tools>summary:hover,.mp3-tools[open]>summary{background:#1a1a1a;border-color:#464646;color:#fff}
+    .mp3-tools{position:relative}.mp3-tools>summary::-webkit-details-marker{display:none}.mp3-tools-panel{position:absolute;right:0;top:44px;width:202px;padding:8px;display:grid;gap:5px;background:#111;border:1px solid #2e2e2e;border-radius:10px;box-shadow:0 18px 42px rgba(0,0,0,.5);z-index:100}
+    .mp3-tools-panel a{display:block;padding:9px 10px;border:1px solid #252525;border-radius:7px;background:#151515;color:#d0d0d0;text-decoration:none;font-size:12px;font-weight:550}.mp3-tools-panel a:hover{background:#1d1d1d;border-color:#3d3d3d;color:#fff}
+    @media(max-width:700px){.mp3-music,.mp3-tools>summary{height:32px;min-width:52px;padding:0 9px;font-size:10px}.mp3-tools-panel{position:fixed;right:12px;top:64px;width:min(212px,calc(100vw - 24px))}}
+  </style>
   <script defer src="../assets/mp3.js?v=12"></script>
-  <script defer src="../assets/nav-ui.js?v=1"></script>
 </head>
 <body data-platform="youtube-mp3">
+  <audio id="mp3-bgm" src="../assets/site-bgm.mp3" preload="metadata" loop></audio>
   <div class="shell">
-    <nav class="nav"><a class="brand" href="../"><span class="brand-mark"></span><span>RVL</span></a><div class="nav-right"><a class="nav-link" href="../">Homepage</a><div class="lang"><button type="button" data-lang="id" class="active">ID</button><button type="button" data-lang="en">EN</button></div></div></nav>
+    <nav class="nav">
+      <a class="brand" href="../"><span class="brand-mark"></span><span>RVL</span></a>
+      <div class="nav-right">
+        <button id="mp3-music" class="mp3-music" type="button">Music</button>
+        <details class="mp3-tools">
+          <summary>Tools</summary>
+          <div class="mp3-tools-panel">
+            <a href="../clarity/">TikTok Method</a>
+            <a href="../tiktok-downloader/">TikTok Downloader</a>
+            <a href="../youtube-downloader/">YouTube Video</a>
+            <a href="../youtube-shorts/">YouTube Shorts</a>
+            <a href="./">YouTube MP3</a>
+          </div>
+        </details>
+        <div class="lang"><button type="button" data-lang="id" class="active">ID</button><button type="button" data-lang="en">EN</button></div>
+      </div>
+    </nav>
     <main class="downloader-page">
       <div class="downloader-wrap">
         <div class="downloader-head"><span class="eyebrow"><i class="eyebrow-dot"></i>YOUTUBE AUDIO</span><h1>YouTube MP3 Downloader</h1><p id="page-sub">Tempel link YouTube, cek audionya, lalu pilih Audio Asli atau MP3 192 kbps.</p></div>
@@ -25,5 +49,8 @@
       </div>
     </main>
   </div>
+  <script>
+    (()=>{const a=document.getElementById('mp3-bgm'),b=document.getElementById('mp3-music');a.volume=.16;let on=localStorage.getItem('rvl-bgm-enabled')!=='0';const sync=()=>b.classList.toggle('off',!on);const play=()=>{if(on)a.play().catch(()=>{})};sync();const t=Number(sessionStorage.getItem('rvl-bgm-time')||0);a.addEventListener('loadedmetadata',()=>{if(Number.isFinite(t)&&t>0&&a.duration)a.currentTime=t%a.duration},{once:true});const first=()=>{play();window.removeEventListener('pointerdown',first,true);window.removeEventListener('keydown',first,true)};window.addEventListener('pointerdown',first,true);window.addEventListener('keydown',first,true);b.addEventListener('click',()=>{on=!on;localStorage.setItem('rvl-bgm-enabled',on?'1':'0');sync();if(on)play();else a.pause()});window.addEventListener('beforeunload',()=>{if(Number.isFinite(a.currentTime))sessionStorage.setItem('rvl-bgm-time',String(a.currentTime))});})();
+  </script>
 </body>
 </html>
