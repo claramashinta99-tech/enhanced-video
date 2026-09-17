@@ -13,15 +13,16 @@ from fastapi.responses import StreamingResponse
 
 app = base.app
 legacy = base.legacy
-legacy.APP_VERSION = '1.13.2'
+legacy.APP_VERSION = '1.13.4'
 app.version = legacy.APP_VERSION
 
 # Preserve the MP3 module's own fallback before this module replaces the fast path.
 _ORIGINAL_FAST_MP3_SYNC = base.fast_mp3_sync
 
-# YouTube/GoogleVideo throttles large/open-ended media requests. Keep every
-# upstream request comfortably below the ~10 MiB limit documented by yt-dlp.
+# Stable transport stays at 4 MiB. The experimental encoder pipeline uses
+# smaller ranges so FFmpeg can start encoding before the whole source arrives.
 UPSTREAM_CHUNK = int(os.getenv('YOUTUBE_HTTP_CHUNK', str(4 * 1024 * 1024)))
+PIPELINE_CHUNK = int(os.getenv('YOUTUBE_PIPELINE_CHUNK', str(1024 * 1024)))
 READ_CHUNK = 256 * 1024
 UPSTREAM_RETRIES = 2
 
@@ -86,14 +87,15 @@ def _read_upstream_range(source, start, end):
     raise last_error or IOError('googlevideo range failed')
 
 
-def _iter_upstream(source, start=0, end=None, release_slot=False):
+def _iter_upstream(source, start=0, end=None, release_slot=False, chunk_size=None):
     try:
         total = _source_size(source)
         if end is None and total > 0:
             end = total - 1
         pos = max(0, int(start or 0))
+        step = max(256 * 1024, int(chunk_size or UPSTREAM_CHUNK))
         while end is None or pos <= end:
-            wanted_end = pos + UPSTREAM_CHUNK - 1
+            wanted_end = pos + step - 1
             if end is not None:
                 wanted_end = min(wanted_end, end)
             data = _read_upstream_range(source, pos, wanted_end)
@@ -140,8 +142,6 @@ def _content_disposition(filename):
 @app.get('/api/audio/chunked/{token}')
 async def stream_chunked_audio(token: str, request: Request):
     base._purge_audio_tokens()
-    # Keep token for its TTL so the browser can reconnect/resume instead of
-    # receiving 404 after the first interrupted request.
     with base._audio_token_lock:
         item = base._audio_tokens.get(token)
     if not item:
@@ -236,18 +236,91 @@ def _convert_local_to_mp3(source_path, source_data, workdir, job_id=None):
     return output
 
 
+def _stream_chunked_to_mp3(source_data, workdir, job_id=None):
+    source = source_data['source']
+    title = base._safe_title(source_data.get('title'))
+    duration = float(source_data.get('duration') or 0)
+    output = Path(workdir) / f'{title}.mp3'
+    total = _source_size(source)
+    legacy.clear_workdir(workdir)
+
+    cmd = [
+        'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+        '-i', 'pipe:0',
+        '-vn', '-map', '0:a:0?',
+        '-c:a', 'libmp3lame', '-b:a', '192k', '-compression_level', '0',
+        '-threads', '1', str(output),
+    ]
+    if job_id:
+        legacy.job_update(job_id, state='working', progress=12, stage='Download + Convert MP3')
+
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        bufsize=0,
+    )
+    done = 0
+    started = time.monotonic()
+    try:
+        if proc.stdin is None:
+            raise RuntimeError('ffmpeg stdin unavailable')
+        for data in _iter_upstream(
+            source,
+            0,
+            total - 1 if total > 0 else None,
+            release_slot=False,
+            chunk_size=PIPELINE_CHUNK,
+        ):
+            proc.stdin.write(data)
+            done += len(data)
+            if job_id and total > 0:
+                ratio = min(1.0, done / total)
+                legacy.job_update(job_id, state='working', progress=14 + int(ratio * 80), stage='Download + Convert MP3')
+        proc.stdin.close()
+        code = proc.wait(timeout=max(120, int(duration * 2 + 30) if duration else 180))
+    except Exception:
+        try:
+            if proc.stdin and not proc.stdin.closed:
+                proc.stdin.close()
+        except Exception:
+            pass
+        if proc.poll() is None:
+            proc.kill()
+        raise
+
+    if code != 0 or not output.is_file() or output.stat().st_size <= 1024:
+        raise RuntimeError('streaming MP3 conversion failed')
+    if job_id:
+        legacy.job_update(job_id, state='working', progress=98, stage='Finalisasi')
+    print(f'mp3 pipelined transcode done ms={int((time.monotonic()-started)*1000)} bytes={output.stat().st_size}', flush=True)
+    return output
+
+
 def chunked_mp3_sync(url, workdir, job_id=None):
     if job_id:
         legacy.job_update(job_id, state='working', progress=8, stage='Menyiapkan audio')
     try:
         source_data = base._wait_source(url)
+    except Exception as exc:
+        print(f'mp3 source fallback type={type(exc).__name__}', flush=True)
+        return _ORIGINAL_FAST_MP3_SYNC(url, workdir, job_id)
+
+    try:
+        return _stream_chunked_to_mp3(source_data, workdir, job_id)
+    except Exception as exc:
+        print(f'mp3 pipeline fallback type={type(exc).__name__}', flush=True)
+        legacy.clear_workdir(workdir)
+
+    try:
         source_path = _download_chunked_source(source_data, workdir, job_id)
         return _convert_local_to_mp3(source_path, source_data, workdir, job_id)
     except Exception as exc:
-        print(f'mp3 chunked path fallback type={type(exc).__name__}', flush=True)
+        print(f'mp3 stable chunk fallback type={type(exc).__name__}', flush=True)
+        legacy.clear_workdir(workdir)
         return _ORIGINAL_FAST_MP3_SYNC(url, workdir, job_id)
 
 
-# The job runner in mp3_app resolves this global at request time, so replacing
-# it keeps the existing API/UI while retaining the original downloader as a fallback.
+# Use the pipelined path first, keep the exact stable path and original downloader as fallbacks.
 base.fast_mp3_sync = chunked_mp3_sync
