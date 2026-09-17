@@ -9,29 +9,30 @@ on:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     env:
       RENDER: https://rvl-api.onrender.com
       SHORT: https://www.youtube.com/watch?v=n1h8pX1pfOU
     steps:
-      - name: Exact Shorts direct job
+      - name: Wait for diagnostic backend
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$SHORT\",\"quality\":\"best\"}" "$RENDER/api/jobs" | tee /tmp/job.json
-          echo
-          JOB=$(python -c 'import json; print(json.load(open("/tmp/job.json"))["job_id"])')
           READY=0
-          for i in $(seq 1 150); do
-            BODY=$(curl -fsS --max-time 30 "$RENDER/api/jobs/$JOB")
-            echo "shorts $i $BODY"
-            STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
-            if [ "$STATE" = ready ]; then READY=1; break; fi
-            [ "$STATE" = error ] && exit 1
-            sleep 1
+          for i in $(seq 1 60); do
+            BODY=$(curl -sS --max-time 20 "$RENDER/api/youtube/engine" || true)
+            echo "$i $BODY"
+            if printf '%s' "$BODY" | grep -q 'web-cookie-test'; then READY=1; break; fi
+            sleep 5
           done
           [ "$READY" = 1 ]
-          curl -fsS -L --max-time 90 -r 0-65535 -o /tmp/short.bin "$RENDER/api/jobs/$JOB/file"
-          BYTES=$(wc -c < /tmp/short.bin)
-          echo "shorts file_probe_bytes=$BYTES"
-          [ "$BYTES" -gt 10000 ]
+      - name: Probe exact Shorts strategies
+        shell: bash
+        run: |
+          set -euo pipefail
+          ENC=$(python -c 'import urllib.parse,os; print(urllib.parse.quote(os.environ["SHORT"],safe=""))')
+          for S in web-cookie-test mweb-cookie-test safari-cookie-test creator-cookie-test music-cookie-test tv-cookie-test ios-cookie-test android-cookie-test default-embedded-cookie; do
+            echo "===== $S ====="
+            curl -fsS --max-time 45 "$RENDER/api/youtube/selftest/$S?url=$ENC" || true
+            echo
+          done
