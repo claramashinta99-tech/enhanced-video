@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from yt_dlp.utils import DownloadError
 
 app=legacy.app
-legacy.APP_VERSION='1.12.2';app.version=legacy.APP_VERSION
+legacy.APP_VERSION='1.12.3';app.version=legacy.APP_VERSION
 MP3_SOURCE_TTL=600;MP3_PREP_WAIT=18;AUDIO_TOKEN_TTL=180;AUDIO_STREAM_CONCURRENCY=4
 _mp3_source_lock=threading.Lock();_mp3_sources={};_audio_token_lock=threading.Lock();_audio_tokens={};_audio_stream_slots=threading.BoundedSemaphore(AUDIO_STREAM_CONCURRENCY)
 
@@ -110,7 +110,6 @@ def _ffmpeg_headers(source):
 
 def _transcode_direct(source_data,workdir,job_id=None):
  source=source_data['source'];title=_safe_title(source_data.get('title'));duration=float(source_data.get('duration') or 0);output=Path(workdir)/f'{title}.mp3';legacy.clear_workdir(workdir)
- # Direct network input -> MP3 output. No intermediate media file and no single-thread cap.
  cmd=['ffmpeg','-nostdin','-hide_banner','-loglevel','error','-y','-rw_timeout','15000000','-reconnect','1','-reconnect_streamed','1','-reconnect_delay_max','1']+_ffmpeg_headers(source)+['-i',source['url'],'-vn','-map','0:a:0?','-c:a','libmp3lame','-b:a','192k','-compression_level','0','-write_xing','0','-id3v2_version','3','-progress','pipe:1','-nostats',str(output)]
  if job_id:legacy.job_update(job_id,state='working',progress=16,stage='Convert MP3')
  started=time.monotonic();proc=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,bufsize=1)
@@ -131,8 +130,13 @@ def _transcode_direct(source_data,workdir,job_id=None):
 
 def fast_mp3_sync(url,workdir,job_id=None):
  if job_id:legacy.job_update(job_id,state='working',progress=8,stage='Menyiapkan audio')
- # Source preparation already starts during /api/mp3/info, so the normal path goes straight to FFmpeg.
- return _transcode_direct(_wait_source(url),workdir,job_id)
+ try:
+  return _transcode_direct(_wait_source(url),workdir,job_id)
+ except Exception as exc:
+  print(f'mp3 fast path fallback type={type(exc).__name__}',flush=True)
+  if job_id:legacy.job_update(job_id,state='working',progress=8,stage='Fallback audio')
+  legacy.clear_workdir(workdir)
+  return legacy.download_sync(url,'audio',workdir,job_id)
 
 def _purge_audio_tokens():
  cutoff=time.time()-AUDIO_TOKEN_TTL
@@ -159,7 +163,10 @@ async def run_mp3_job(job_id,url):
  try:
   async with legacy.DOWNLOAD_SLOTS:path=await asyncio.to_thread(fast_mp3_sync,url,workdir,job_id)
   legacy.job_update(job_id,state='ready',progress=100,stage='Siap',filename=path.name,path=str(path))
- except Exception as exc:print(f'mp3 job failed id={job_id} type={type(exc).__name__}',flush=True);legacy.job_update(job_id,state='error',progress=0,stage='Gagal',error='MP3 gagal diproses dari sumber YouTube. Coba lagi.')
+ except DownloadError as exc:
+  legacy.job_update(job_id,state='error',progress=0,stage='Gagal',error=legacy.youtube_error(exc))
+ except Exception as exc:
+  print(f'mp3 job failed id={job_id} type={type(exc).__name__}',flush=True);legacy.job_update(job_id,state='error',progress=0,stage='Gagal',error=legacy.youtube_error(exc))
 
 @app.post('/api/mp3/info')
 async def mp3_info(body:legacy.URLBody):
