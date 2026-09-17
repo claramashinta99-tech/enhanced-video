@@ -9,43 +9,64 @@ on:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     env:
-      RAILWAY: https://enhanced-video-production.up.railway.app
       RENDER: https://rvl-api.onrender.com
-      VIDEO_ID: Xh7I5J8eDQY
+      VIDEO: https://www.youtube.com/watch?v=Xh7I5J8eDQY
+      SHORT: https://www.youtube.com/watch?v=n1n8pX1pfOU
     steps:
-      - name: Compare backends
+      - name: E2E Render video and shorts
         shell: bash
         run: |
-          set -u
-          echo '=== RAILWAY ==='
-          curl -sS --max-time 45 "$RAILWAY/health" || true
-          echo
-          echo '=== RENDER ==='
-          curl -sS --max-time 90 "$RENDER/health" || true
-          echo
-          echo '=== RENDER INFO ==='
-          curl -i -sS --max-time 90 -H 'Content-Type: application/json' -d "{\"url\":\"https://www.youtube.com/watch?v=$VIDEO_ID\"}" "$RENDER/api/info" || true
-          echo
-      - name: Probe Y2Mate current external route
+          set -euo pipefail
+          test_job(){
+            local url="$1" q="$2" tag="$3"
+            echo "=== INFO $tag ==="
+            time curl -fsS --max-time 100 -H 'Content-Type: application/json' -d "{\"url\":\"$url\"}" "$RENDER/api/info" | tee "/tmp/${tag}-info.json"
+            echo
+            echo "=== JOB $tag ==="
+            curl -fsS --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$url\",\"quality\":\"$q\"}" "$RENDER/api/jobs" | tee "/tmp/${tag}-job.json"
+            echo
+            JOB=$(python -c "import json; print(json.load(open('/tmp/${tag}-job.json'))['job_id'])")
+            READY=0
+            for i in $(seq 1 150); do
+              BODY=$(curl -fsS --max-time 30 "$RENDER/api/jobs/$JOB")
+              echo "$tag $i $BODY"
+              STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
+              if [ "$STATE" = ready ]; then READY=1; break; fi
+              [ "$STATE" = error ] && exit 1
+              sleep 1
+            done
+            [ "$READY" = 1 ]
+            curl -fsS -L --max-time 90 -r 0-65535 -o "/tmp/${tag}.bin" "$RENDER/api/jobs/$JOB/file"
+            BYTES=$(wc -c < "/tmp/${tag}.bin")
+            echo "$tag file_probe_bytes=$BYTES"
+            [ "$BYTES" -gt 10000 ]
+          }
+          test_job "$VIDEO" best video
+          test_job "$SHORT" best shorts
+      - name: E2E Render MP3
         shell: bash
         run: |
-          set -u
-          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36'
-          H=(-H 'Accept: */*' -H 'Origin: https://y2mate.gs' -H 'Referer: https://y2mate.gs/' -H "User-Agent: $UA")
-          echo '=== AUTH ==='
-          AUTH=$(curl -sS --max-time 30 "${H[@]}" "https://eta.etacloud.org/api/v1/auth?_=$(date +%s%3N)" || true)
-          echo "$AUTH"
-          KEY=$(printf '%s' "$AUTH" | python -c 'import json,sys; d=json.load(sys.stdin); print(d.get("key", ""))' 2>/dev/null || true)
-          [ -n "$KEY" ] || exit 0
-          echo '=== INIT ==='
-          INIT=$(curl -sS --max-time 30 "${H[@]}" -H "Authorization: Bearer $KEY" "https://eta.etacloud.org/api/v1/init?_=$(date +%s%3N)" || true)
-          echo "$INIT"
-          CONVERT=$(printf '%s' "$INIT" | python -c 'import json,sys; d=json.load(sys.stdin); print(d.get("convertURL", ""))' 2>/dev/null || true)
-          [ -n "$CONVERT" ] || exit 0
-          for F in mp3 mp4; do
-            echo "=== CONVERT $F ==="
-            OUT=$(curl -sS --max-time 90 "${H[@]}" "${CONVERT}&v=${VIDEO_ID}&f=${F}&_=$(date +%s%3N)" || true)
-            echo "$OUT"
+          set -euo pipefail
+          echo '=== MP3 INFO ==='
+          time curl -fsS --max-time 100 -H 'Content-Type: application/json' -d "{\"url\":\"$VIDEO\"}" "$RENDER/api/mp3/info" | tee /tmp/mp3-info.json
+          echo
+          echo '=== MP3 JOB ==='
+          curl -fsS --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$VIDEO\",\"quality\":\"mp3\"}" "$RENDER/api/mp3/jobs" | tee /tmp/mp3-job.json
+          echo
+          JOB=$(python -c 'import json; print(json.load(open("/tmp/mp3-job.json"))["job_id"])')
+          READY=0
+          for i in $(seq 1 180); do
+            BODY=$(curl -fsS --max-time 30 "$RENDER/api/jobs/$JOB")
+            echo "mp3 $i $BODY"
+            STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
+            if [ "$STATE" = ready ]; then READY=1; break; fi
+            [ "$STATE" = error ] && exit 1
+            sleep 1
           done
+          [ "$READY" = 1 ]
+          curl -fsS -L --max-time 90 -r 0-65535 -o /tmp/mp3.bin "$RENDER/api/jobs/$JOB/file"
+          BYTES=$(wc -c < /tmp/mp3.bin)
+          echo "mp3 file_probe_bytes=$BYTES"
+          [ "$BYTES" -gt 10000 ]
