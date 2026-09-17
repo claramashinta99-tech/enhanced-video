@@ -125,7 +125,12 @@ def _base_opts(platform, *, quality='best', workdir=None, job_id=None):
                 height = int(quality)
             except (TypeError, ValueError):
                 height = None
-        if height:
+        if platform == 'instagram':
+            if height:
+                opts['format'] = f'bestvideo[height={height}]+bestaudio/best[height={height}]/bestvideo+bestaudio/best'
+            else:
+                opts['format'] = 'bestvideo+bestaudio/best'
+        elif height:
             opts['format'] = f'best[height={height}][ext=mp4]/best[height={height}]/best[height<={height}]'
         else:
             opts['format'] = 'best[ext=mp4]/best'
