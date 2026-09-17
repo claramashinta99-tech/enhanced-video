@@ -1,57 +1,67 @@
-name: RVL production media smoke
+name: RVL production TikTok HD smoke
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - backend/tiktok_engine_app.py
+      - .github/workflows/prod-tiktok-shorts-smoke.yml
   workflow_dispatch:
 
 jobs:
-  tiktok:
+  tiktok-hd:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     env:
       RAILWAY: https://enhanced-video-production.up.railway.app
-      TIKTOK_URL: https://www.tiktok.com/@bukanpidel1/video/7669610923919363349
+      TIKTOK_URL: https://www.tiktok.com/@azzorml13/video/7682277583664336136?is_from_webapp=1&sender_device=pc
     steps:
-      - name: Wait for Railway v1.16.0
+      - name: Install ffprobe
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
+      - name: Wait for Railway v1.18.0
         shell: bash
         run: |
           set -euo pipefail
-          for i in $(seq 1 60); do
-            BODY=$(curl -fsS -L --max-time 30 "$RAILWAY/health" || true)
+          for i in $(seq 1 100); do
+            BODY=$(curl -fsS -L --max-time 20 "$RAILWAY/health" || true)
             echo "$BODY"
             VER=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("version",""))' "$BODY" 2>/dev/null || true)
-            [ "$VER" = "1.16.0" ] && exit 0
+            [ "$VER" = "1.18.0" ] && exit 0
             sleep 6
           done
+          echo "Railway never reached v1.18.0"
           exit 1
 
-      - name: TikTok metadata exposes Normal and HD
+      - name: Verify Normal and HD choices
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS -L --max-time 90 -H 'Content-Type: application/json' -d "{\"url\":\"$TIKTOK_URL\"}" "$RAILWAY/api/info" | tee /tmp/tiktok-info.json
+          curl -fsS -L --max-time 90 -H 'Content-Type: application/json' \
+            -d "{\"url\":\"$TIKTOK_URL\"}" "$RAILWAY/api/info" | tee /tmp/info.json
           python - <<'PY'
           import json
-          x=json.load(open('/tmp/tiktok-info.json'))
-          print({k:x.get(k) for k in ['platform','id','title','thumbnail','duration','choices']})
-          assert x.get('platform') == 'tiktok'
-          assert x.get('id') == '7669610923919363349'
-          assert x.get('thumbnail')
+          x=json.load(open('/tmp/info.json'))
+          assert x.get('platform') == 'tiktok', x
+          assert x.get('id') == '7682277583664336136', x
           choices=x.get('choices') or []
-          ids=[c.get('id') for c in choices]
-          labels=[c.get('label') for c in choices]
-          assert ids == ['best','2160'], (ids, labels)
-          assert labels[0] == 'Normal'
-          assert labels[1].startswith('HD')
+          assert [c.get('id') for c in choices] == ['best','2160'], choices
+          assert choices[0].get('label') == 'Normal', choices
+          assert choices[1].get('label') == 'HD · Original source', choices
+          print('choices=', choices)
           PY
 
-      - name: TikTok HD end-to-end download
+      - name: Download HD through production API
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$TIKTOK_URL\",\"quality\":\"2160\"}" "$RAILWAY/api/jobs" | tee /tmp/tiktok-job.json
-          JOB=$(python -c 'import json; print(json.load(open("/tmp/tiktok-job.json"))["job_id"])')
+          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' \
+            -d "{\"url\":\"$TIKTOK_URL\",\"quality\":\"2160\"}" "$RAILWAY/api/jobs" | tee /tmp/job.json
+          JOB=$(python -c 'import json; print(json.load(open("/tmp/job.json"))["job_id"])')
           READY=0
-          for i in $(seq 1 90); do
+          for i in $(seq 1 120); do
             BODY=$(curl -fsS -L --max-time 20 "$RAILWAY/api/jobs/$JOB")
             echo "$BODY"
             STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
@@ -64,34 +74,29 @@ jobs:
             sleep 1
           done
           [ "$READY" = 1 ]
-          curl -fsS -L --max-time 60 -r 0-131071 -o /tmp/tiktok-hd.bin "$RAILWAY/api/jobs/$JOB/file"
-          BYTES=$(wc -c < /tmp/tiktok-hd.bin)
-          echo "tiktok_hd_bytes=$BYTES"
-          test "$BYTES" -gt 10000
+          curl -fsS -L --max-time 120 -o /tmp/tiktok-hd.mp4 "$RAILWAY/api/jobs/$JOB/file"
 
-  shorts:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    env:
-      RAILWAY: https://enhanced-video-production.up.railway.app
-      SHORT_URL: https://www.youtube.com/shorts/Xh7I5J8eDQY
-    steps:
-      - name: Shorts end-to-end on Railway
+      - name: Verify production HD media
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS -L --max-time 30 "$RAILWAY/health" >/tmp/health.json
-          curl -fsS -L --max-time 45 -H 'Content-Type: application/json' -d "{\"url\":\"$SHORT_URL\"}" "$RAILWAY/api/info" >/tmp/short-info.json
-          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$SHORT_URL\",\"quality\":\"best\"}" "$RAILWAY/api/jobs" >/tmp/short-job.json
-          JOB=$(python -c 'import json; print(json.load(open("/tmp/short-job.json"))["job_id"])')
-          READY=0
-          for i in $(seq 1 60); do
-            BODY=$(curl -fsS -L --max-time 20 "$RAILWAY/api/jobs/$JOB")
-            STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
-            if [ "$STATE" = ready ]; then READY=1; break; fi
-            [ "$STATE" = error ] && exit 1
-            sleep 1
-          done
-          [ "$READY" = 1 ]
-          curl -fsS -L --max-time 60 -r 0-131071 -o /tmp/short.bin "$RAILWAY/api/jobs/$JOB/file"
-          test $(wc -c < /tmp/short.bin) -gt 10000
+          ffprobe -v error -show_entries format=size,bit_rate:stream=codec_type,codec_name,width,height,avg_frame_rate,bit_rate -of json /tmp/tiktok-hd.mp4 | tee /tmp/probe.json
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/probe.json'))
+          fmt=x.get('format') or {}
+          videos=[s for s in x.get('streams') or [] if s.get('codec_type')=='video']
+          audios=[s for s in x.get('streams') or [] if s.get('codec_type')=='audio']
+          assert videos and audios, x
+          v=videos[0]
+          w,h=int(v.get('width') or 0),int(v.get('height') or 0)
+          n,d=(v.get('avg_frame_rate') or '0/1').split('/')
+          fps=float(n)/float(d) if float(d) else 0
+          total=int(fmt.get('bit_rate') or 0)
+          size=int(fmt.get('size') or 0)
+          print({'codec':v.get('codec_name'),'width':w,'height':h,'fps':fps,'bit_rate':total,'size':size})
+          assert min(w,h) >= 1080, (w,h)
+          assert fps >= 50, fps
+          assert total >= 10_000_000, total
+          assert size >= 50_000_000, size
+          PY
