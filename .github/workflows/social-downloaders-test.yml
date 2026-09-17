@@ -1,0 +1,83 @@
+name: Social downloader branch test
+
+on:
+  push:
+    branches: [feature-social-downloaders-20260918]
+    paths:
+      - backend/social_downloaders_app.py
+      - backend/requirements.txt
+      - Dockerfile
+      - .github/workflows/social-downloaders-test.yml
+  workflow_dispatch:
+
+jobs:
+  test-social:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install backend requirements
+        run: |
+          python -m pip install -q --upgrade pip
+          python -m pip install -q -r backend/requirements.txt
+      - name: Compile isolated backend
+        run: python -m py_compile backend/social_downloaders_app.py
+      - name: Import and local route smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=backend uvicorn social_downloaders_app:app --host 127.0.0.1 --port 18080 >/tmp/social-api.log 2>&1 &
+          PID=$!
+          trap 'kill $PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/api/social/health | tee /tmp/social-health.json; then break; fi
+            sleep 1
+          done
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/social-health.json'))
+          assert x['ok'] is True, x
+          assert x['platforms'] == ['facebook','instagram','x'], x
+          PY
+      - name: Probe public Facebook Instagram and X metadata
+        env:
+          PYTHONPATH: backend
+        run: |
+          python - <<'PY'
+          import json, time
+          import social_downloaders_app as s
+
+          tests = {
+              'facebook': 'https://www.facebook.com/cnn/videos/10155529876156509/',
+              'instagram': 'https://www.instagram.com/reel/Chunk8-jurw/',
+              'x': 'https://x.com/MunTheShinobi/status/1600009574919962625',
+          }
+          results={}
+          for platform,url in tests.items():
+              started=time.time()
+              try:
+                  info=s.extract_social_info(url, platform)
+                  formats=s._video_formats(info)
+                  results[platform]={
+                      'ok': bool(formats),
+                      'seconds': round(time.time()-started,2),
+                      'id': info.get('id'),
+                      'title': (info.get('title') or '')[:90],
+                      'formats': len(formats),
+                      'max_height': s.max_height(info),
+                      'direct': bool(info.get('_rvl_direct')),
+                  }
+              except Exception as exc:
+                  results[platform]={
+                      'ok': False,
+                      'seconds': round(time.time()-started,2),
+                      'error': f'{type(exc).__name__}: {str(exc)}'[-500:],
+                  }
+              print(platform, json.dumps(results[platform], ensure_ascii=False))
+          print('RESULTS=' + json.dumps(results, ensure_ascii=False))
+          if not all(v.get('ok') for v in results.values()):
+              raise SystemExit(2)
+          PY
