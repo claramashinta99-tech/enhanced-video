@@ -1,6 +1,6 @@
 const translations={
   id:{tools:'Tools',homeBadge:'RVL TOOLS',homeTitle:'Tools buat video, tanpa ribet.',homeSub:'Clarity udah aktif. Tool lain nyusul.',openClarity:'Buka Clarity',viewTools:'Lihat tools',ourTools:'Pilih tool',toolsSub:'Satu tempat buat workflow media yang sering kepake.',clarityDesc:'Siapkan video tanpa encode ulang yang nggak perlu.',tiktokDesc:'Tool ini segera hadir.',youtubeDesc:'Tool ini segera hadir.',available:'AKTIF',soon:'SEGERA',openTool:'Buka tool',previewTool:'Lihat halaman',privacy:'Lokal',privacyDesc:'Clarity jalan di browser. File tetap di perangkat lu.',mobile:'Responsif',mobileDesc:'Nyaman dipakai dari HP sampai desktop.',simple:'Ringkas',simpleDesc:'Nggak ada menu yang nggak perlu.',back:'Balik ke RVL',tiktokPageSub:'Tool ini segera hadir.',youtubePageSub:'Tool ini segera hadir.',pasteTikTok:'Tempel link',pasteYouTube:'Tempel link',download:'Lanjut',comingShort:'Segera hadir',comingNote:'Belum tersedia. Lagi disiapin.',home:'Homepage'},
-  en:{tools:'Tools',homeBadge:'RVL TOOLS',homeTitle:'Video tools, without the clutter.',homeSub:'Clarity is live. More tools are coming.',openClarity:'Open Clarity',viewTools:'View tools',ourTools:'Choose a tool',toolsSub:'One place for the media tasks you actually use.',clarityDesc:'Prepare video without unnecessary re-encoding.',tiktokDesc:'This tool is coming soon.',youtubeDesc:'This tool is coming soon.',available:'LIVE',soon:'SOON',openTool:'Open tool',previewTool:'View page',privacy:'Local',privacyDesc:'Clarity runs in your browser. Your file stays on your device.',mobile:'Responsive',mobileDesc:'Comfortable on mobile and desktop.',simple:'Simple',simpleDesc:'No unnecessary menus.',back:'Back to RVL',tiktokPageSub:'This tool is coming soon.',youtubePageSub:'This tool is coming soon.',pasteTikTok:'Paste link',pasteYouTube:'Paste link',download:'Continue',comingShort:'Coming soon',comingNote:'Not available yet. In progress.',home:'Homepage'}
+  en:{tools:'Tools',homeBadge:'RVL TOOLS',homeTitle:'Video tools, without the clutter.',homeSub:'Clarity is live. More tools are coming.',openClarity:'Open Clarity',viewTools:'View tools',ourTools:'Choose a tool',toolsSub:'One place for the media tasks you actually use.',clarityDesc:'Prepare video without unnecessary re-encoding.',tiktokDesc:'This tool is coming soon.',youtubeDesc:'This tool is coming soon.',available:'LIVE',soon:'SOON',openTool:'Open tool',previewTool:'View page',privacy:'Local',privacyDesc:'Clarity runs in the browser. Your file stays on your device.',mobile:'Responsive',mobileDesc:'Comfortable on mobile and desktop.',simple:'Simple',simpleDesc:'No unnecessary menus.',back:'Back to RVL',tiktokPageSub:'This tool is coming soon.',youtubePageSub:'This tool is coming soon.',pasteTikTok:'Paste link',pasteYouTube:'Paste link',download:'Continue',comingShort:'Coming soon',comingNote:'Not available yet. In progress.',home:'Homepage'}
 };
 function getLang(){return localStorage.getItem('reyval-lang')||'id'}
 function applyBrand(){
@@ -32,9 +32,12 @@ function installSiteBgm(){
   audio.addEventListener('loadedmetadata',()=>{if(Number.isFinite(stored)&&stored>0&&audio.duration)audio.currentTime=stored%audio.duration},{once:true});
   const saveTime=()=>{if(Number.isFinite(audio.currentTime))sessionStorage.setItem('rvl-bgm-time',String(audio.currentTime))};
   setInterval(saveTime,1000);window.addEventListener('beforeunload',saveTime);document.addEventListener('visibilitychange',()=>{if(document.hidden)saveTime()});
-  const tryPlay=()=>{if(!enabled)return;audio.play().catch(()=>{})};
-  const firstGesture=()=>{tryPlay();window.removeEventListener('pointerdown',firstGesture,true);window.removeEventListener('keydown',firstGesture,true)};
-  window.addEventListener('pointerdown',firstGesture,true);window.addEventListener('keydown',firstGesture,true);
+  const tryPlay=()=>{if(!enabled)return Promise.resolve(false);return audio.play().then(()=>true).catch(()=>false)};
+  const unlockEvents=['pointerdown','pointerup','touchstart','touchend','keydown'];
+  const removeUnlock=()=>unlockEvents.forEach(type=>window.removeEventListener(type,firstGesture,true));
+  const firstGesture=()=>{tryPlay().then(ok=>{if(ok)removeUnlock()})};
+  unlockEvents.forEach(type=>window.addEventListener(type,firstGesture,true));
+  tryPlay();
   btn.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();enabled=!enabled;localStorage.setItem('rvl-bgm-enabled',enabled?'1':'0');syncButton();if(enabled)tryPlay();else audio.pause()});
 }
 
