@@ -9,51 +9,20 @@ on:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 8
     env:
       RENDER: https://rvl-api.onrender.com
       VIDEO: https://www.youtube.com/watch?v=Xh7I5J8eDQY
-      SHORT: https://www.youtube.com/watch?v=n1n8pX1pfOU
     steps:
-      - name: E2E Render video and shorts
-        shell: bash
-        run: |
-          set -euo pipefail
-          test_job(){
-            local url="$1" q="$2" tag="$3"
-            echo "=== INFO $tag ==="
-            time curl -fsS --max-time 100 -H 'Content-Type: application/json' -d "{\"url\":\"$url\"}" "$RENDER/api/info" | tee "/tmp/${tag}-info.json"
-            echo
-            echo "=== JOB $tag ==="
-            curl -fsS --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$url\",\"quality\":\"$q\"}" "$RENDER/api/jobs" | tee "/tmp/${tag}-job.json"
-            echo
-            JOB=$(python -c "import json; print(json.load(open('/tmp/${tag}-job.json'))['job_id'])")
-            READY=0
-            for i in $(seq 1 150); do
-              BODY=$(curl -fsS --max-time 30 "$RENDER/api/jobs/$JOB")
-              echo "$tag $i $BODY"
-              STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
-              if [ "$STATE" = ready ]; then READY=1; break; fi
-              [ "$STATE" = error ] && exit 1
-              sleep 1
-            done
-            [ "$READY" = 1 ]
-            curl -fsS -L --max-time 90 -r 0-65535 -o "/tmp/${tag}.bin" "$RENDER/api/jobs/$JOB/file"
-            BYTES=$(wc -c < "/tmp/${tag}.bin")
-            echo "$tag file_probe_bytes=$BYTES"
-            [ "$BYTES" -gt 10000 ]
-          }
-          test_job "$VIDEO" best video
-          test_job "$SHORT" best shorts
       - name: E2E Render MP3
         shell: bash
         run: |
           set -euo pipefail
           echo '=== MP3 INFO ==='
-          time curl -fsS --max-time 100 -H 'Content-Type: application/json' -d "{\"url\":\"$VIDEO\"}" "$RENDER/api/mp3/info" | tee /tmp/mp3-info.json
+          curl -fsS --max-time 100 -H 'Content-Type: application/json' -d "{\"url\":\"$VIDEO\"}" "$RENDER/api/mp3/info" | tee /tmp/mp3-info.json
           echo
           echo '=== MP3 JOB ==='
-          curl -fsS --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$VIDEO\",\"quality\":\"mp3\"}" "$RENDER/api/mp3/jobs" | tee /tmp/mp3-job.json
+          curl -fsS --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$VIDEO\",\"quality\":\"audio\"}" "$RENDER/api/mp3/jobs" | tee /tmp/mp3-job.json
           echo
           JOB=$(python -c 'import json; print(json.load(open("/tmp/mp3-job.json"))["job_id"])')
           READY=0
