@@ -7,6 +7,10 @@
   <meta name="description" content="YouTube Shorts Downloader — RVL.">
   <title>YouTube Shorts Downloader — RVL</title>
   <link rel="stylesheet" href="../assets/styles.css">
+  <style>
+    body[data-platform="youtube-shorts"] #media-card:not(.show){display:none!important}
+    body[data-platform="youtube-shorts"] #media-thumb:not([src]),body[data-platform="youtube-shorts"] #media-thumb[src=""]{display:none!important}
+  </style>
   <script defer src="../assets/common.js?v=20260917restore1"></script>
   <script defer src="../assets/ambient.js?v=1"></script>
   <script defer src="../assets/pixel.js?v=1"></script>
@@ -14,6 +18,7 @@
   <script defer src="../assets/shorts-layout.js?v=1"></script>
   <script defer src="../assets/router.js?v=10"></script>
   <script defer src="../assets/shorts.js?v=5"></script>
+  <script defer src="../assets/tools-menu.js?v=1"></script>
 </head>
 <body data-platform="youtube-shorts">
   <div class="shell">
