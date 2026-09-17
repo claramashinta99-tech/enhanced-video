@@ -1,4 +1,12 @@
 (()=>{
+  function ensureHomeNav(){
+    if(document.querySelector('#rvl-home-nav-only'))return;
+    const style=document.createElement('style');
+    style.id='rvl-home-nav-only';
+    style.textContent='body:has(.home-main) .rvl-tools-wrap{display:none!important}';
+    document.head.appendChild(style);
+  }
+  ensureHomeNav();
   if(window.__rvlHomeModule){window.__rvlHomeModule.apply();return}
   const copy={
     id:{
