@@ -9,30 +9,20 @@ on:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 6
     env:
       RENDER: https://rvl-api.onrender.com
       VIDEO: https://www.youtube.com/watch?v=Xh7I5J8eDQY
     steps:
-      - name: E2E Render generic audio
+      - name: E2E Render original audio
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS --max-time 100 -H 'Content-Type: application/json' -d "{\"url\":\"$VIDEO\"}" "$RENDER/api/info" >/tmp/info.json
-          curl -fsS --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$VIDEO\",\"quality\":\"audio\"}" "$RENDER/api/jobs" | tee /tmp/job.json
+          curl -fsS --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$VIDEO\"}" "$RENDER/api/mp3/info" >/tmp/info.json
+          curl -fsS --max-time 90 -H 'Content-Type: application/json' -d "{\"url\":\"$VIDEO\"}" "$RENDER/api/audio/prepare" | tee /tmp/prep.json
           echo
-          JOB=$(python -c 'import json; print(json.load(open("/tmp/job.json"))["job_id"])')
-          READY=0
-          for i in $(seq 1 180); do
-            BODY=$(curl -fsS --max-time 30 "$RENDER/api/jobs/$JOB")
-            echo "audio $i $BODY"
-            STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
-            if [ "$STATE" = ready ]; then READY=1; break; fi
-            [ "$STATE" = error ] && exit 1
-            sleep 1
-          done
-          [ "$READY" = 1 ]
-          curl -fsS -L --max-time 90 -r 0-65535 -o /tmp/audio.bin "$RENDER/api/jobs/$JOB/file"
+          TOKEN=$(python -c 'import json; print(json.load(open("/tmp/prep.json"))["token"])')
+          curl -fsS -L --max-time 90 -r 0-65535 -o /tmp/audio.bin "$RENDER/api/audio/chunked/$TOKEN"
           BYTES=$(wc -c < /tmp/audio.bin)
-          echo "audio file_probe_bytes=$BYTES"
+          echo "original_audio_probe_bytes=$BYTES"
           [ "$BYTES" -gt 10000 ]
