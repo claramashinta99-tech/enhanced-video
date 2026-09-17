@@ -1,0 +1,35 @@
+name: MP3 page smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/mp3-page-smoke.yml'
+      - 'youtube-mp3/index.html'
+      - 'assets/mp3.js'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax check MP3 client
+        run: node --check assets/mp3.js
+      - name: Verify production HTML is the isolated MP3 page
+        run: |
+          URL="https://reyval.web.id/youtube-mp3/?smoke=${GITHUB_SHA}"
+          curl -fsSL --retry 3 --max-time 15 -H 'Cache-Control: no-cache' "$URL" -o live.html
+          grep -q 'assets/mp3.js?v=10' live.html
+          ! grep -q 'assets/router.js' live.html
+          ! grep -q 'assets/pixel.js' live.html
+          ! grep -q 'assets/common.js' live.html
+      - name: Open production MP3 page in Chrome
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$CHROME"
+          URL="https://reyval.web.id/youtube-mp3/?smoke=${GITHUB_SHA}"
+          timeout 20s "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --virtual-time-budget=2000 --dump-dom "$URL" > dom.html
+          grep -q 'YouTube MP3 Downloader' dom.html
+          test "$(wc -c < dom.html)" -gt 500
