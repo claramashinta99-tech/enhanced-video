@@ -27,9 +27,20 @@
   function fmtDuration(s){if(!Number.isFinite(Number(s)))return'';s=Math.round(Number(s));const m=Math.floor(s/60),sec=s%60;return `${m}:${String(sec).padStart(2,'0')}`}
   function fmtBytes(n){n=Number(n);if(!Number.isFinite(n)||n<=0)return'';const u=['B','KB','MB','GB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return `${n.toFixed(i?1:0)} ${u[i]}`}
   function sleep(ms){return new Promise(r=>setTimeout(r,ms))}function setStatus(msg='',type=''){statusEl.textContent=msg;statusEl.className='download-status-text'+(type?' '+type:'')}
-  function setSize(bytes=0,estimated=true,pending=false){if(!sizeEl)return;if(pending){sizeEl.textContent=text('Ukuran: menghitung…','Size: calculating…');return}const f=fmtBytes(bytes);sizeEl.textContent=f?`${text('Ukuran','Size')}: ${estimated?'~':''}${f}`:''}
-  function roughSize(){if(!current)return 0;const d=Number(current.data.duration||0);if(!d)return 0;const q=quality.value;let mbps;if(platform==='tiktok')mbps=q==='2160'?7:3.5;else{const h=q==='best'?Number(current.data.max_height||1080):Number(q||1080);mbps=h>=2160?25:h>=1440?12:h>=1080?6:h>=720?3:1.5}return d*((mbps*1e6)+192000)/8}
-  async function refreshSize(){const run=++sizeRun;if(!current){setSize();return}const choice=(current.data.choices||[]).find(c=>String(c.id)===String(quality.value));if(choice?.estimated_bytes){setSize(choice.estimated_bytes,true);return}setSize(0,true,true);try{const r=await fetch(`${RVL_API}/api/file-size`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url,quality:quality.value}),cache:'no-store'});const data=await r.json().catch(()=>({}));if(run!==sizeRun||!current)return;if(r.ok&&data.bytes){setSize(data.bytes,data.estimated!==false);return}}catch{}if(run===sizeRun)setSize(roughSize(),true)}
+  function setSize(bytes=0,estimated=true,pending=false){if(!sizeEl)return;if(pending){sizeEl.textContent=text('Ukuran: menghitung…','Size: calculating…');return}const f=fmtBytes(bytes);sizeEl.textContent=f?`${text('Ukuran','Size')}: ${estimated?'~':''}${f}`:text('Ukuran: tidak tersedia','Size: unavailable')}
+  async function refreshSize(){
+    const run=++sizeRun;if(!current){if(sizeEl)sizeEl.textContent='';return}
+    setSize(0,true,true);
+    for(let attempt=0;attempt<3&&run===sizeRun&&current;attempt++){
+      try{
+        const r=await fetch(`${RVL_API}/api/file-size-v3`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url,quality:quality.value}),cache:'no-store'});
+        const data=await r.json().catch(()=>({}));if(run!==sizeRun||!current)return;
+        if(r.ok&&data.bytes){setSize(data.bytes,data.estimated!==false);return}
+      }catch{}
+      if(attempt<2)await sleep(450);
+    }
+    if(run===sizeRun)setSize(0,false,false);
+  }
   function isShortUrl(url){try{const u=new URL(url);return /(^|\.)youtube\.com$/i.test(u.hostname)&&/^\/shorts\/[A-Za-z0-9_-]{11}(?:\/|$)/.test(u.pathname)}catch{return false}}
   function validForPlatform(url){try{const h=new URL(url).hostname.toLowerCase();return platform==='youtube'?(/(^|\.)youtube\.com$/.test(h)||h==='youtu.be'):(/(^|\.)tiktok\.com$/.test(h))}catch{return false}}
   function setProgress(value=0,stage='',opts={}){const pct=Math.max(0,Math.min(100,Math.round(Number(value)||0)));progressWrap.classList.add('show');progressWrap.classList.toggle('indeterminate',!!opts.indeterminate);progressFill.style.width=`${pct}%`;progressPct.textContent=opts.indeterminate?'':`${pct}%`;progressStage.textContent=stage||text('Menyiapkan','Preparing')}
