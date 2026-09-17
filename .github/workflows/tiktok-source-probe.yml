@@ -11,7 +11,7 @@ on:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,116 +24,86 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
           pip install -r backend/requirements.txt
-      - name: Recover TikTok internal URI and probe source play endpoints
+      - name: Probe TikDownloader.io Ultra HD candidates
         working-directory: backend
         env:
           TEST_URL: https://www.tiktok.com/@azzorml13/video/7682277583664336136?is_from_webapp=1&sender_device=pc
         run: |
           python - <<'PY'
-          import json, os, re, tempfile, urllib.parse
+          import html, json, os, re, tempfile, urllib.parse
           from pathlib import Path
-          from curl_cffi import requests as crequests
-          from yt_dlp import YoutubeDL
+          from curl_cffi import requests
           import tiktok_engine_app as t
 
           url=os.environ['TEST_URL']
-          info=t._extract_native_info(url, force_app=True)
-          formats=t._hd_candidates(info)
-          assert formats
-          print('video_id=',info.get('id'))
-          print('candidate_count=',len(formats))
-          for f in formats[:8]:
-              print('format=',json.dumps({
-                  'id':f.get('format_id'),'width':f.get('width'),'height':f.get('height'),
-                  'fps':f.get('fps'),'tbr':f.get('tbr'),'filesize':f.get('filesize') or f.get('filesize_approx'),
-                  'vcodec':f.get('vcodec'),'acodec':f.get('acodec')},ensure_ascii=False))
+          api='https://tikdownloader.io/api/ajaxSearch'
+          headers={
+              'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept':'application/json, text/javascript, */*; q=0.01',
+              'Accept-Language':'en-US,en;q=0.9',
+              'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8',
+              'Origin':'https://tikdownloader.io',
+              'Referer':'https://tikdownloader.io/en',
+              'X-Requested-With':'XMLHttpRequest',
+          }
+          s=requests.Session(impersonate='chrome')
+          r=s.post(api,data={'q':url,'lang':'en'},headers=headers,timeout=35)
+          print('api_status=',r.status_code,'content_type=',r.headers.get('content-type'),'bytes=',len(r.content))
+          print('api_head=',r.text[:300].replace('\n',' '))
+          r.raise_for_status()
+          payload=r.json()
+          fragment=str(payload.get('data') or '')
+          print('html_bytes=',len(fragment))
+          assert fragment,'TikDownloader.io returned empty data'
 
-          # Let yt-dlp itself download the best exposed app format; unlike raw
-          # urllib it preserves the request behavior TikTok expects.
-          with tempfile.TemporaryDirectory() as d:
-              opts=t._tiktok_opts(url,True)
-              opts.update({
-                  'format':formats[0]['format_id'],
-                  'outtmpl':str(Path(d)/'%(id)s.%(ext)s'),
-                  'quiet':False,'no_warnings':False,'retries':1,'fragment_retries':1,
-              })
-              with YoutubeDL(opts) as y:
-                  y.download([url])
-              files=[x for x in Path(d).iterdir() if x.is_file()]
-              assert files
-              source=max(files,key=lambda x:x.stat().st_size)
-              print('downloaded=',source.name,source.stat().st_size)
-              print('downloaded_probe=',json.dumps(t._probe(source),ensure_ascii=False))
-              blob=source.read_bytes()
-              # TikTok MP4s commonly carry e.g. "vid:v1c044g..." in metadata.
-              matches=[]
-              for pat in (
-                  rb'vid:([A-Za-z0-9_-]{12,120})',
-                  rb'video_id[=:]([A-Za-z0-9_-]{12,120})',
-              ):
-                  for m in re.finditer(pat,blob):
-                      value=m.group(1).decode('ascii','ignore').rstrip('_-')
-                      if value and value not in matches:
-                          matches.append(value)
-              print('binary_internal_uris=',matches)
-              # Also dump nearby printable metadata when the exact regex misses.
-              if not matches:
-                  text=''.join(chr(b) if 32<=b<127 else '\n' for b in blob)
-                  for line in text.splitlines():
-                      if 'vid:' in line.lower() or 'video_id' in line.lower():
-                          print('binary_hint=',line[:500])
-              assert matches,'could not recover TikTok internal video URI from downloaded MP4'
-              uris=matches[:4]
+          # Extract every anchor and nearby text; we verify actual files with ffprobe.
+          links=[]
+          for m in re.finditer(r'<a\b([^>]*)>(.*?)</a>',fragment,re.I|re.S):
+              attrs,body=m.group(1),m.group(2)
+              hm=re.search(r'\bhref=["\']([^"\']+)',attrs,re.I)
+              if not hm: continue
+              href=html.unescape(hm.group(1)).strip()
+              text=html.unescape(re.sub(r'<[^>]+>',' ',body))
+              text=re.sub(r'\s+',' ',text).strip()
+              if href.startswith('//'): href='https:'+href
+              elif href.startswith('/'): href=urllib.parse.urljoin('https://tikdownloader.io/',href)
+              if href.startswith('http'):
+                  links.append((href,text))
+          # De-duplicate while preserving HTML order.
+          seen=set(); uniq=[]
+          for href,text in links:
+              if href in seen: continue
+              seen.add(href); uniq.append((href,text))
+          print('anchors=',len(uniq))
+          for i,(href,text) in enumerate(uniq):
+              print('anchor',i,json.dumps({'text':text,'host':urllib.parse.urlparse(href).hostname,'url':href[:350]},ensure_ascii=False))
 
-          # The old public play API increasingly requires the full app identity.
-          # Reuse the device/app fields that yt-dlp generates for TikTok.
-          from yt_dlp.extractor.tiktok import TikTokIE
-          with YoutubeDL(t._tiktok_opts(url,True)) as ydl:
-              ie=TikTokIE(ydl)
-              ie._get_next_app_info()
-              base=ie._build_api_query({})
-              app_ua=ie._APP_USER_AGENT
-              api_host=ie._API_HOSTNAME
+          video_links=[x for x in uniq if any(k in x[1].lower() for k in ('mp4','video','hd','download'))]
+          if not video_links: video_links=uniq
+          assert video_links,'no candidate links found'
 
-          endpoints=[
-              f'https://{api_host}/aweme/v1/play/',
-              'https://api-h2.tiktokv.com/aweme/v1/play/',
-              'https://aweme.snssdk.com/aweme/v1/play/',
-          ]
-          headers={'User-Agent':app_ua,'Accept':'*/*'}
-          candidates=[]
-          for uri in uris:
-              for endpoint in endpoints:
-                  for ratio in ('1080p','default','720p'):
-                      q=dict(base)
-                      q.update({
-                          'video_id':uri,'vr_type':'0','is_play_url':'1',
-                          'source':'PackSourceEnum_FEED','media_type':'4',
-                          'ratio':ratio,'line':'0','improve_bitrate':'1',
-                      })
-                      try:
-                          r=crequests.get(endpoint,params=q,headers=headers,impersonate='chrome',allow_redirects=True,timeout=35)
-                          ct=(r.headers.get('content-type') or '').lower()
-                          row={'uri':uri,'endpoint':endpoint,'ratio':ratio,'status':r.status_code,
-                               'final_host':urllib.parse.urlparse(r.url).hostname,'content_type':ct,
-                               'content_length':r.headers.get('content-length'),'body_len':len(r.content),
-                               'head':r.content[:12].hex()}
-                          print('play_probe=',json.dumps(row,ensure_ascii=False))
-                          is_mp4=len(r.content)>100000 and (r.content[4:8]==b'ftyp' or 'video' in ct or 'octet-stream' in ct)
-                          if r.status_code==200 and is_mp4:
-                              with tempfile.NamedTemporaryFile(suffix='.mp4',delete=False) as tmp:
-                                  tmp.write(r.content); p=Path(tmp.name)
-                              row['probe']=t._probe(p); row['file_size']=p.stat().st_size
-                              print('play_candidate_probe=',json.dumps(row,ensure_ascii=False))
-                              candidates.append(row); p.unlink(missing_ok=True)
-                      except Exception as e:
-                          print('play_probe_failed=',uri,endpoint,ratio,type(e).__name__,str(e)[-250:])
+          results=[]
+          dl_headers={'User-Agent':headers['User-Agent'],'Referer':'https://tikdownloader.io/en','Accept':'*/*'}
+          for i,(href,label) in enumerate(video_links[:10]):
+              try:
+                  rr=s.get(href,headers=dl_headers,allow_redirects=True,timeout=60)
+                  print('candidate_http',i,rr.status_code,len(rr.content),rr.headers.get('content-type'),urllib.parse.urlparse(rr.url).hostname,label)
+                  if rr.status_code!=200 or len(rr.content)<100000: continue
+                  with tempfile.NamedTemporaryFile(suffix='.mp4',delete=False) as f:
+                      f.write(rr.content); p=Path(f.name)
+                  probe=t._probe(p)
+                  p.unlink(missing_ok=True)
+                  row={'index':i,'label':label,'bytes':len(rr.content),'final_url':rr.url,'probe':probe}
+                  results.append(row)
+                  print('CANDIDATE_PROBE=',json.dumps(row,ensure_ascii=False))
+              except Exception as e:
+                  print('candidate_failed',i,type(e).__name__,str(e)[-300:])
 
-          print('play_candidates_found=',len(candidates))
-          if candidates:
-              def rank(x):
-                  v=(x.get('probe') or {}).get('video') or {}
-                  w,h=v.get('width') or 0,v.get('height') or 0
-                  return (min(w,h),v.get('fps') or 0,(x.get('probe') or {}).get('bit_rate') or 0,x.get('file_size') or 0)
-              print('BEST_PLAY_SOURCE=',json.dumps(max(candidates,key=rank),ensure_ascii=False))
+          assert results,'no downloadable TikDownloader.io video candidate'
+          def rank(x):
+              v=(x.get('probe') or {}).get('video') or {}
+              w,h=v.get('width') or 0,v.get('height') or 0
+              return (min(w,h),v.get('fps') or 0,(x.get('probe') or {}).get('bit_rate') or 0,x.get('bytes') or 0)
+          winner=max(results,key=rank)
+          print('BEST_TIKDOWNLOADER_SOURCE=',json.dumps(winner,ensure_ascii=False))
           PY
