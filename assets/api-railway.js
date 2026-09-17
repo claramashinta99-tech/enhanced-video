@@ -1,14 +1,20 @@
 (()=>{
   if(window.__rvlRailwayBridge)return;
   window.__rvlRailwayBridge=true;
-  const FROM='https://rvl-api.onrender.com';
-  const TO='https://enhanced-video-production.up.railway.app';
-  const useRailway=()=>true;
+  const RENDER='https://rvl-api.onrender.com';
+  const RAILWAY='https://enhanced-video-production.up.railway.app';
+  const platform=()=>document.body?.dataset?.platform||'';
+  const isYouTube=()=>platform().startsWith('youtube');
+  const isMp3=()=>platform()==='youtube-mp3';
   const rewrite=value=>{
     try{
-      const s=String(value||'');
-      if(!useRailway())return s;
-      return s.startsWith(FROM)?TO+s.slice(FROM.length):s;
+      let s=String(value||'');
+      if(isYouTube()){
+        if(s.startsWith(RAILWAY))s=RENDER+s.slice(RAILWAY.length);
+        if(isMp3()&&s.startsWith(RENDER+'/api/mp3/jobs'))s=RENDER+'/api/jobs'+s.slice((RENDER+'/api/mp3/jobs').length);
+        return s;
+      }
+      return s.startsWith(RENDER)?RAILWAY+s.slice(RENDER.length):s;
     }catch{return value}
   };
 
