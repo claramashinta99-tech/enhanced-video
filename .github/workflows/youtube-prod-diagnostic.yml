@@ -9,55 +9,43 @@ on:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
     env:
-      API: https://enhanced-video-production.up.railway.app
-      VIDEO: https://www.youtube.com/watch?v=Xh7I5J8eDQY
-      SHORT: https://www.youtube.com/shorts/n1n8pX1pfOU
-      UA: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36 EdgA/144.0.0.0
+      RAILWAY: https://enhanced-video-production.up.railway.app
+      RENDER: https://rvl-api.onrender.com
+      VIDEO_ID: Xh7I5J8eDQY
     steps:
-      - name: Confirm direct Railway block
+      - name: Compare backends
         shell: bash
         run: |
-          set -euo pipefail
-          curl -fsS --max-time 30 "$API/health" || true
+          set -u
+          echo '=== RAILWAY ==='
+          curl -sS --max-time 45 "$RAILWAY/health" || true
           echo
-          curl -i -sS --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$VIDEO\"}" "$API/api/info" || true
+          echo '=== RENDER ==='
+          curl -sS --max-time 90 "$RENDER/health" || true
           echo
-      - name: Probe cnv external fallback
+          echo '=== RENDER INFO ==='
+          curl -i -sS --max-time 90 -H 'Content-Type: application/json' -d "{\"url\":\"https://www.youtube.com/watch?v=$VIDEO_ID\"}" "$RENDER/api/info" || true
+          echo
+      - name: Probe Y2Mate current external route
         shell: bash
         run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json, urllib.parse, urllib.request, time
-
-          ua='Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36 EdgA/144.0.0.0'
-          base_headers={'User-Agent':ua,'Accept':'*/*','Origin':'https://iframe.y2meta-uk.com','Referer':'https://iframe.y2meta-uk.com/'}
-          def req(url, data=None, headers=None, timeout=60):
-              h=dict(base_headers); h.update(headers or {})
-              r=urllib.request.Request(url,data=data,headers=h,method='POST' if data is not None else 'GET')
-              with urllib.request.urlopen(r,timeout=timeout) as x:
-                  return x.status,x.headers, x.read().decode('utf-8','replace')
-          st,_,raw=req('https://cnv.cx/v2/sanity/key',timeout=20)
-          print('key_status',st)
-          key=json.loads(raw).get('key')
-          print('key_present',bool(key))
-          assert key
-          links=['https://www.youtube.com/watch?v=Xh7I5J8eDQY','https://www.youtube.com/shorts/n1n8pX1pfOU']
-          tests=[('mp3','192'),('mp4','720'),('mp4','1080'),('mp4','2160')]
-          for link in links:
-              for fmt,q in tests:
-                  body=urllib.parse.urlencode({'link':link,'format':fmt,'audioBitrate':'192','videoQuality':q,'filenameStyle':'pretty','vCodec':'h264'}).encode()
-                  try:
-                      s,_,out=req('https://cnv.cx/v2/converter',body,{'key':key,'Content-Type':'application/x-www-form-urlencoded'},90)
-                      data=json.loads(out)
-                      url=data.get('url')
-                      print('convert',link.split('/')[-1],fmt,q,'status',s,'has_url',bool(url),'filename',data.get('filename'),'error',data.get('error') or data.get('message'))
-                      if url:
-                          rr=urllib.request.Request(url,headers={'User-Agent':ua,'Range':'bytes=0-65535','Accept':'*/*'})
-                          with urllib.request.urlopen(rr,timeout=35) as r:
-                              chunk=r.read(65536)
-                              print('file_probe',fmt,q,'http',r.status,'bytes',len(chunk),'type',r.headers.get('Content-Type'),'length',r.headers.get('Content-Length'),'range',r.headers.get('Content-Range'))
-                  except Exception as e:
-                      print('convert_fail',link.split('/')[-1],fmt,q,type(e).__name__,str(e)[:300])
-          PY
+          set -u
+          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36'
+          H=(-H 'Accept: */*' -H 'Origin: https://y2mate.gs' -H 'Referer: https://y2mate.gs/' -H "User-Agent: $UA")
+          echo '=== AUTH ==='
+          AUTH=$(curl -sS --max-time 30 "${H[@]}" "https://eta.etacloud.org/api/v1/auth?_=$(date +%s%3N)" || true)
+          echo "$AUTH"
+          KEY=$(printf '%s' "$AUTH" | python -c 'import json,sys; d=json.load(sys.stdin); print(d.get("key", ""))' 2>/dev/null || true)
+          [ -n "$KEY" ] || exit 0
+          echo '=== INIT ==='
+          INIT=$(curl -sS --max-time 30 "${H[@]}" -H "Authorization: Bearer $KEY" "https://eta.etacloud.org/api/v1/init?_=$(date +%s%3N)" || true)
+          echo "$INIT"
+          CONVERT=$(printf '%s' "$INIT" | python -c 'import json,sys; d=json.load(sys.stdin); print(d.get("convertURL", ""))' 2>/dev/null || true)
+          [ -n "$CONVERT" ] || exit 0
+          for F in mp3 mp4; do
+            echo "=== CONVERT $F ==="
+            OUT=$(curl -sS --max-time 90 "${H[@]}" "${CONVERT}&v=${VIDEO_ID}&f=${F}&_=$(date +%s%3N)" || true)
+            echo "$OUT"
+          done
