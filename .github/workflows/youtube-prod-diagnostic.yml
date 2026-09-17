@@ -14,14 +14,10 @@ jobs:
       RENDER: https://rvl-api.onrender.com
       SHORT: https://www.youtube.com/watch?v=n1h8pX1pfOU
     steps:
-      - name: E2E exact Shorts
+      - name: Exact Shorts direct job
         shell: bash
         run: |
           set -euo pipefail
-          echo '=== INFO ==='
-          curl -fsS --max-time 100 -H 'Content-Type: application/json' -d "{\"url\":\"$SHORT\"}" "$RENDER/api/info" | tee /tmp/info.json
-          echo
-          echo '=== JOB ==='
           curl -fsS --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$SHORT\",\"quality\":\"best\"}" "$RENDER/api/jobs" | tee /tmp/job.json
           echo
           JOB=$(python -c 'import json; print(json.load(open("/tmp/job.json"))["job_id"])')
