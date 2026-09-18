@@ -1,6 +1,6 @@
 (()=>{
-  const ROUTES=new Set(['/','/clarity/','/tiktok-downloader/','/youtube-downloader/','/youtube-shorts/','/youtube-mp3/','/facebook-downloader/','/instagram-downloader/','/x-downloader/']);
-  const SCRIPT={'/':'/assets/home.js','/clarity/':'/assets/clarity-route.js','/tiktok-downloader/':'/assets/downloader.js','/youtube-downloader/':'/assets/downloader.js','/youtube-shorts/':'/assets/shorts.js','/youtube-mp3/':'/assets/mp3.js','/facebook-downloader/':'/assets/social-downloader.js','/instagram-downloader/':'/assets/social-downloader.js','/x-downloader/':'/assets/social-downloader.js'};
+  const ROUTES=new Set(['/','/clarity/','/universal-downloader/','/media-inspector/','/tiktok-downloader/','/youtube-downloader/','/youtube-shorts/','/youtube-mp3/','/facebook-downloader/','/instagram-downloader/','/x-downloader/']);
+  const SCRIPT={'/':'/assets/home.js','/clarity/':'/assets/clarity-route.js','/universal-downloader/':'/assets/universal-downloader.js','/media-inspector/':'/assets/media-inspector.js','/tiktok-downloader/':'/assets/downloader.js','/youtube-downloader/':'/assets/downloader.js','/youtube-shorts/':'/assets/shorts.js','/youtube-mp3/':'/assets/mp3.js','/facebook-downloader/':'/assets/social-downloader.js','/instagram-downloader/':'/assets/social-downloader.js','/x-downloader/':'/assets/social-downloader.js'};
   let navigating=false,activeController=null;
   const pathOf=value=>{const u=new URL(value,location.href);let p=u.pathname;if(!p.endsWith('/')&&!p.split('/').pop().includes('.'))p+='/';return p};
   const setNav=path=>{const a=document.querySelector('.nav-right > .nav-link');if(!a)return;if(path==='/'){a.href='#tools';a.textContent='Tools';a.dataset.i18n='tools'}else{a.href='/';a.textContent='Homepage';a.dataset.i18n='home'}};
