@@ -20,7 +20,7 @@ RUN git clone --depth 1 --branch 2.0.0 https://github.com/Brainicism/bgutil-ytdl
     && npm ci \
     && npx tsc
 
-COPY app.py mp3_app.py audio_chunked_app.py diagnostic_app.py shorts_app.py youtube_engine_app.py tiktok_engine_app.py tiktok_hd_app.py social_downloaders_app.py ./
+COPY app.py mp3_app.py audio_chunked_app.py diagnostic_app.py shorts_app.py youtube_engine_app.py tiktok_engine_app.py tiktok_hd_app.py social_downloaders_app.py media_inspector_app.py ./
 
 EXPOSE 10000
-CMD ["sh", "-c", "node /opt/bgutil/server/build/main.js --host 127.0.0.1 --port 4416 >/tmp/bgutil.log 2>&1 & exec uvicorn social_downloaders_app:app --host 0.0.0.0 --port ${PORT:-10000}"]
+CMD ["sh", "-c", "node /opt/bgutil/server/build/main.js --host 127.0.0.1 --port 4416 >/tmp/bgutil.log 2>&1 & exec uvicorn media_inspector_app:app --host 0.0.0.0 --port ${PORT:-10000}"]
