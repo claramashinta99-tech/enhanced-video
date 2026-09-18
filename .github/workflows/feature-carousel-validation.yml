@@ -90,3 +90,15 @@ jobs:
               assert Path(bundle).is_file() and Path(bundle).stat().st_size>1024
               print('tiktok bundle bytes',Path(bundle).stat().st_size)
           PY
+      - name: Live Instagram carousel resolver smoke
+        continue-on-error: true
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import carousel_routes as c
+          url='https://www.instagram.com/p/DY6_odElAFO/'
+          info=c.extract_carousel_info(url,'instagram')
+          assert info['platform']=='instagram'
+          assert len(info['items'])>=2
+          print('instagram carousel items',len(info['items']))
+          PY
