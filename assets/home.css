@@ -89,3 +89,11 @@
   .home-quick-copy span{max-width:190px}
   .home-tool-card{padding:19px}
 }
+
+.home-universal{position:relative;border:3px solid #35446a;border-radius:5px;padding:18px;background:rgba(15,22,42,.9);box-shadow:7px 7px 0 #070a14;overflow:hidden}
+.home-universal:before{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(145deg,rgba(110,216,255,.05),transparent 35%,rgba(170,140,255,.08))}
+.home-universal>*{position:relative}.home-universal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.home-universal-head h2{margin:8px 0 0;font-size:24px;letter-spacing:-.035em}.home-universal-head>a{font-size:11px;color:#aa8cff}
+.home-universal-sub{margin:14px 0 16px;color:#aab5d3;font-size:12px;line-height:1.5}.home-universal-platforms{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.home-universal-platforms>span{display:grid;place-items:center;gap:6px;min-width:0;padding:9px 4px;border:2px solid #2c3859;background:#10172b;box-shadow:2px 2px 0 #070a14}.home-universal-platforms img{width:27px;height:27px}.home-universal-platforms b{font-size:9px;white-space:nowrap}
+.home-universal-types{display:flex;flex-wrap:wrap;gap:6px;margin:13px 0}.home-universal-types span{border:1px solid #35446a;background:#10172b;padding:5px 7px;border-radius:3px;color:#aab5d3;font-size:9px}.home-universal-input{display:grid;grid-template-columns:1fr auto;gap:8px}.home-universal-input input{min-width:0;border:3px solid #263453;background:#0c1224;color:#fff;padding:12px 13px;border-radius:3px;outline:none;box-shadow:inset 3px 3px 0 rgba(0,0,0,.25)}.home-universal-input input:focus{border-color:#6ed8ff}.home-universal-error{min-height:14px;margin-top:8px;color:#ff9d9d;font-size:10px}.home-universal-foot{display:flex;justify-content:space-between;gap:10px;margin-top:6px;color:#7885a6;font-size:9px}
+@media(max-width:940px){.home-universal{max-width:720px}}
+@media(max-width:700px){.home-universal-platforms{grid-template-columns:repeat(5,minmax(62px,1fr));overflow-x:auto;padding-bottom:3px}.home-universal-platforms>span{min-width:66px}.home-universal-input{grid-template-columns:1fr}.home-universal-input .btn{width:100%}.home-universal-foot{flex-direction:column;gap:4px}}
