@@ -1,11 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="YouTube Video">
-  <g fill="#101426" shape-rendering="crispEdges">
-    <rect x="5" y="8" width="22" height="16"/><rect x="8" y="5" width="16" height="3"/><rect x="8" y="24" width="16" height="3"/>
-  </g>
-  <g fill="#ffd977" shape-rendering="crispEdges">
-    <rect x="9" y="11" width="14" height="10"/><rect x="23" y="14" width="2" height="4"/>
-  </g>
-  <g fill="#101426" shape-rendering="crispEdges">
-    <rect x="13" y="13" width="3" height="6"/><rect x="16" y="14" width="3" height="4"/><rect x="19" y="15" width="2" height="2"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="YouTube Video">
+  <rect x="8" y="14" width="48" height="34" rx="11" fill="#ff2d43"/>
+  <path d="M28 24.5 43 32 28 39.5Z" fill="#fff"/>
+  <circle cx="49" cy="47" r="11" fill="#0d1426" stroke="#ffd4dc" stroke-width="3"/>
+  <path d="M49 39v11m0 0-4.5-4.5M49 50l4.5-4.5M43.5 53.5h11" fill="none" stroke="#ff7487" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
