@@ -61,10 +61,10 @@ const GUIDE_CSS=String.raw`
 .shot-final-body{position:relative;height:90%;padding:8% 7%;background:#fff;color:#172033}.shot-thumb{height:28%;display:grid;place-items:center;background:linear-gradient(160deg,#ff91c8,#6d74e8 55%,#30238e);color:#fff;font-weight:900;font-size:14px}.shot-file{margin:7px 0 10px;font-size:7px;color:#65738a;overflow:hidden;text-overflow:ellipsis}.shot-final-body label{font-size:7px;font-weight:700}.shot-caption{height:42px;margin-top:4px;border:1px solid #ccd3df;padding:6px;font-size:7px}.shot-switch-row{display:flex;align-items:center;justify-content:space-between;margin-top:8px;font-size:7px}.shot-final-upload{margin-top:12px;background:#fe2c55!important;color:#fff!important;text-align:center;padding:9px;font-size:9px;font-weight:800}.shot-final .shot-pointer{right:8%;bottom:8%}
 @keyframes shotPulse{0%,100%{filter:brightness(1);transform:scale(1)}50%{filter:brightness(1.18);transform:scale(1.025)}}@keyframes pointerNudge{to{transform:translate(4px,4px)}}
 .upload-guide-action{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:18px;padding-top:16px;border-top:2px dashed #35446a}.upload-guide-action small{color:#7f8caf;line-height:1.55;max-width:760px}.upload-guide-action .btn{white-space:nowrap}
-.guide-demo-modal{position:fixed;inset:0;z-index:10020;display:none;place-items:center;padding:18px}.guide-demo-modal.show{display:grid}.guide-demo-backdrop{position:absolute;inset:0;background:rgba(2,5,14,.82);backdrop-filter:blur(8px)}.guide-demo-dialog{position:relative;width:min(92vw,430px);border:3px solid #35446a;background:#0d1528;box-shadow:10px 10px 0 #070a14,0 0 60px rgba(170,140,255,.16);padding:14px}.guide-demo-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.guide-demo-head b{display:block;margin-top:7px;font-size:15px}.guide-demo-close{width:34px;height:34px;border:2px solid #35446a;background:#151d34;color:#fff;cursor:pointer}.guide-demo-stage{position:relative;min-height:540px;margin-top:12px;overflow:hidden}.guide-demo-frame{position:absolute;inset:0;display:grid;grid-template-rows:1fr auto;gap:10px;opacity:0;transform:translateX(16px) scale(.985);pointer-events:none;transition:opacity .28s ease,transform .28s ease}.guide-demo-frame.active{opacity:1;transform:none}.guide-demo-frame .guide-shot{height:min(68vh,485px);width:auto;max-width:100%;margin:0 auto;aspect-ratio:9/16}.guide-demo-caption{text-align:center;font-size:12px;line-height:1.4}.guide-demo-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:10px;border-top:1px solid #263453;color:#aab5d3;font-size:10px}.guide-demo-dots{display:flex;gap:5px}.guide-demo-dots i{display:block;width:7px;height:7px;background:#35446a}.guide-demo-dots i.active{background:#6ed8ff;box-shadow:0 0 9px #6ed8ff}.guide-demo-open{overflow:hidden}
+.guide-demo-modal{position:fixed;inset:0;z-index:10020;display:none;place-items:center;padding:18px}.guide-demo-modal.show{display:grid}.guide-demo-backdrop{position:absolute;inset:0;background:rgba(2,5,14,.82);backdrop-filter:blur(8px)}.guide-demo-dialog{position:relative;width:min(92vw,430px);border:3px solid #35446a;background:#0d1528;box-shadow:10px 10px 0 #070a14,0 0 60px rgba(170,140,255,.16);padding:14px}.guide-demo-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.guide-demo-head b{display:block;margin-top:7px;font-size:15px}.guide-demo-close{width:34px;height:34px;border:2px solid #35446a;background:#151d34;color:#fff;cursor:pointer}.guide-demo-stage{position:relative;display:grid;place-items:center;margin-top:12px;overflow:hidden}.guide-demo-gif{display:block;width:min(100%,270px);height:auto;aspect-ratio:9/16;object-fit:cover;border:3px solid #070a14;box-shadow:0 0 0 1px #35446a,0 12px 34px rgba(0,0,0,.38);background:#080e1c}.guide-demo-foot{display:flex;align-items:center;justify-content:center;gap:12px;padding-top:10px;border-top:1px solid #263453;color:#aab5d3;font-size:10px}.guide-demo-open{overflow:hidden}
 @media(max-width:1040px){.upload-guide-steps{grid-template-columns:repeat(2,minmax(0,1fr))}.guide-shot{max-width:245px;margin-left:auto;margin-right:auto}.upload-step-head{min-height:0}}
-@media(max-width:620px){.upload-guide-top{flex-direction:column}.upload-demo-btn{width:100%}.upload-guide-steps{grid-template-columns:1fr}.upload-guide-step{padding:13px}.guide-shot{max-width:270px}.upload-guide-action{align-items:stretch;flex-direction:column}.upload-guide-action .btn{width:100%}.guide-demo-stage{min-height:500px}.guide-demo-dialog{padding:11px}}
-@media(prefers-reduced-motion:reduce){.guide-key,.guide-key:after,.shot-hot,.shot-pointer{animation:none!important}.guide-demo-frame{transition:none!important}}
+@media(max-width:620px){.upload-guide-top{flex-direction:column}.upload-demo-btn{width:100%}.upload-guide-steps{grid-template-columns:1fr}.upload-guide-step{padding:13px}.guide-shot{max-width:270px}.upload-guide-action{align-items:stretch;flex-direction:column}.upload-guide-action .btn{width:100%}.guide-demo-dialog{padding:11px}}
+@media(prefers-reduced-motion:reduce){.guide-key,.guide-key:after,.shot-hot,.shot-pointer{animation:none!important}}
 `;
 
 function installGuideStyle(){
@@ -81,10 +81,6 @@ function setHTML(selector,value){
 }
 
 function closeUploadDemo(){
-  if(window.__RVL_UPLOAD_DEMO_TIMER__){
-    clearInterval(window.__RVL_UPLOAD_DEMO_TIMER__);
-    window.__RVL_UPLOAD_DEMO_TIMER__=null;
-  }
   const modal=document.querySelector('#upload-demo-modal');
   if(modal){modal.classList.remove('show');modal.setAttribute('aria-hidden','true')}
   document.body.classList.remove('guide-demo-open');
@@ -95,43 +91,17 @@ function bindUploadDemo(){
   if(!isMethodRoute())return;
   const button=document.querySelector('#upload-demo-btn');
   const modal=document.querySelector('#upload-demo-modal');
-  const stage=document.querySelector('#upload-demo-stage');
-  const dots=document.querySelector('#upload-demo-dots');
-  const progress=document.querySelector('#upload-demo-progress');
-  if(!button||!modal||!stage||!dots||!progress)return;
+  const gif=document.querySelector('#upload-demo-gif');
+  if(!button||!modal||!gif)return;
 
-  const build=()=>{
-    stage.innerHTML='';dots.innerHTML='';
-    const steps=[...document.querySelectorAll('.upload-guide-step')];
-    steps.forEach((step,index)=>{
-      const frame=document.createElement('div');
-      frame.className='guide-demo-frame'+(index===0?' active':'');
-      const shot=step.querySelector('.guide-shot')?.cloneNode(true);
-      const caption=document.createElement('div');
-      caption.className='guide-demo-caption';
-      caption.innerHTML=step.querySelector('.upload-step-head b')?.innerHTML||`Step ${index+1}`;
-      if(shot)frame.appendChild(shot);
-      frame.appendChild(caption);
-      stage.appendChild(frame);
-      const dot=document.createElement('i');if(index===0)dot.className='active';dots.appendChild(dot);
-    });
-    progress.textContent=`Step 1 / ${steps.length}`;
-    return steps.length;
-  };
-  const show=(index,total)=>{
-    const frames=[...stage.querySelectorAll('.guide-demo-frame')];
-    const marks=[...dots.querySelectorAll('i')];
-    frames.forEach((frame,i)=>frame.classList.toggle('active',i===index));
-    marks.forEach((dot,i)=>dot.classList.toggle('active',i===index));
-    progress.textContent=`Step ${index+1} / ${total}`;
-  };
   const open=()=>{
     closeUploadDemo();
-    const total=build();if(!total)return;
-    modal.classList.add('show');modal.setAttribute('aria-hidden','false');document.body.classList.add('guide-demo-open');
+    const base=(gif.getAttribute('src')||'../assets/tutorial/tiktok-upload-demo.gif').split('?')[0];
+    gif.src=`${base}?v=1&t=${Date.now()}`;
+    modal.classList.add('show');
+    modal.setAttribute('aria-hidden','false');
+    document.body.classList.add('guide-demo-open');
     modal.querySelector('.guide-demo-close')?.focus();
-    let index=0;
-    window.__RVL_UPLOAD_DEMO_TIMER__=setInterval(()=>{index=(index+1)%total;show(index,total)},1700);
   };
 
   if(!button.dataset.rvlBound){
@@ -139,10 +109,11 @@ function bindUploadDemo(){
     button.addEventListener('click',open);
   }
   modal.querySelectorAll('[data-demo-close]').forEach(el=>{
-    if(el.dataset.rvlBound)return;el.dataset.rvlBound='1';el.addEventListener('click',closeUploadDemo);
+    if(el.dataset.rvlBound)return;
+    el.dataset.rvlBound='1';
+    el.addEventListener('click',closeUploadDemo);
   });
 }
-
 function applyTikTokMethod(){
   if(!isMethodRoute())return;
   installGuideStyle();
