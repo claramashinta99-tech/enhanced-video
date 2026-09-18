@@ -151,6 +151,4 @@ window.addEventListener('rvl:route',()=>{
   if(!isMethodRoute())closeUploadDemo();
   setTimeout(applyTikTokMethod,0);
 });
-const observer=new MutationObserver(()=>applyTikTokMethod());
-observer.observe(document.body,{subtree:true,childList:true,characterData:true});
 setTimeout(applyTikTokMethod,0);
