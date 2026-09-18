@@ -13,6 +13,8 @@ import social_downloaders_app as base
 
 app = base.app
 
+import carousel_routes  # noqa: E402,F401
+
 MEDIA_INSPECT_MAX_BYTES = int(os.getenv('MEDIA_INSPECT_MAX_BYTES', str(500 * 1024 * 1024)))
 
 
