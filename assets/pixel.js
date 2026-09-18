@@ -11,6 +11,7 @@
   }
   html{background:var(--px-bg)!important}
   body{background:linear-gradient(180deg,#0b1020,#0f162a 48%,#0b1020)!important;color:var(--px-text)!important;font-family:var(--font-ui)!important;letter-spacing:0}
+  button,input,select,textarea,.btn{font-family:var(--font-ui)!important}
   body:before{display:none!important}#rvl-ambient-bg{display:none!important}
   body>.shell,body>main,body>.toast,body>.rvl-credit{position:relative;z-index:2!important}
   .rvl-pixel-bg{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden;background-image:linear-gradient(180deg,rgba(5,8,22,.62),rgba(5,8,22,.80)),radial-gradient(circle at 50% 38%,rgba(170,140,255,.07),rgba(3,5,15,.34) 76%),linear-gradient(rgba(110,216,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(110,216,255,.025) 1px,transparent 1px),url('/assets/rvl-bg-desktop-hd.jpg');background-size:auto,auto,24px 24px,24px 24px,cover;background-position:center,center,0 0,0 0,center 46%;background-repeat:no-repeat,no-repeat,repeat,repeat,no-repeat}
