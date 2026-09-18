@@ -252,6 +252,7 @@ def _instagram_carousel_info(url):
         'skip_download': True,
         'noplaylist': False,
         'extract_flat': False,
+        'ignore_no_formats_error': True,
         'playlistend': CAROUSEL_MAX_ITEMS,
     })
     with YoutubeDL(opts) as ydl:
