@@ -1,0 +1,36 @@
+name: Feature Universal Static Check
+
+on:
+  push:
+    branches:
+      - feature-universal-media-inspector-20260918
+  workflow_dispatch:
+
+jobs:
+  static-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: JavaScript syntax
+        run: |
+          node --check assets/home.js
+          node --check assets/universal-downloader.js
+          node --check assets/media-inspector.js
+          node --check assets/router.js
+      - name: Python syntax
+        run: python -m py_compile backend/media_inspector_app.py
+      - name: Route/cache assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "'/universal-downloader/'" assets/router.js
+          grep -q "'/media-inspector/'" assets/router.js
+          ! grep -R "router.js?v=13" --include='*.html' .
+          grep -q "backend/media_inspector_app.py" Dockerfile
+          grep -q "media_inspector_app.py" backend/Dockerfile
