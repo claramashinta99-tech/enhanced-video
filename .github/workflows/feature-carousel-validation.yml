@@ -68,5 +68,25 @@ jobs:
           assert info['platform']=='tiktok'
           assert len(info['items'])>=1
           assert all(x['kind']=='image' for x in info['items'])
+          assert all(c._url_allowed(x['_url'],'tiktok') for x in info['items'])
+          if info.get('music_url'):
+              assert c._url_allowed(info['music_url'],'tiktok')
           print('tiktok slideshow items',len(info['items']),'audio',info['has_audio'])
+          PY
+      - name: Live TikTok slideshow download smoke
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import tempfile
+          from pathlib import Path
+          import carousel_routes as c
+          url='https://www.tiktok.com/t/ZTSdULQgX/'
+          info=c.extract_carousel_info(url,'tiktok')
+          with tempfile.TemporaryDirectory() as d:
+              one=c._download_item(info,url,info['items'][0],d)
+              assert Path(one).is_file() and Path(one).stat().st_size>1024
+          with tempfile.TemporaryDirectory() as d:
+              bundle=c._bundle_zip(info,url,d)
+              assert Path(bundle).is_file() and Path(bundle).stat().st_size>1024
+              print('tiktok bundle bytes',Path(bundle).stat().st_size)
           PY
