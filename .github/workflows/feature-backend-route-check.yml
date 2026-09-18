@@ -1,0 +1,43 @@
+name: Feature Backend Route Check
+
+on:
+  push:
+    branches:
+      - feature-universal-media-inspector-20260918
+
+jobs:
+  backend-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install backend requirements
+        run: python -m pip install -r backend/requirements.txt
+      - name: Import inherited app and verify routes
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import media_inspector_app as m
+          paths={r.path for r in m.app.routes}
+          required={'/health','/api/info','/api/jobs','/api/social/health','/api/social/info','/api/social/jobs','/api/media/health','/api/media/inspect'}
+          missing=required-paths
+          assert not missing, f'missing routes: {sorted(missing)}'
+          print('routes ok', sorted(required))
+          PY
+      - name: Verify ffprobe metadata path
+        run: |
+          which ffprobe
+          ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=black:s=320x180:d=1 -f lavfi -i sine=frequency=440:duration=1 -shortest -c:v libx264 -c:a aac /tmp/rvl-test.mp4
+          cd backend
+          python - <<'PY'
+          import media_inspector_app as m
+          data=m._probe('/tmp/rvl-test.mp4')
+          v=next(x for x in data['streams'] if x.get('codec_type')=='video')
+          a=next(x for x in data['streams'] if x.get('codec_type')=='audio')
+          assert v['width']==320 and v['height']==180
+          assert v['codec_name']=='h264'
+          assert a['codec_name']=='aac'
+          print('ffprobe ok')
+          PY
