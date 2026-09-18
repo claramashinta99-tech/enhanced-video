@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Media Inspector">
+  <defs><linearGradient id="g" x1="10" y1="8" x2="54" y2="56"><stop stop-color="#d8c8ff"/><stop offset="1" stop-color="#6ed8ff"/></linearGradient></defs>
+  <path d="M16 8h24l10 10v27a7 7 0 0 1-7 7H16a7 7 0 0 1-7-7V15a7 7 0 0 1 7-7Z" fill="none" stroke="url(#g)" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M40 8v11h11M18 27h20M18 35h15" fill="none" stroke="#d8e6ff" stroke-width="3.5" stroke-linecap="round"/>
+  <circle cx="44" cy="43" r="9" fill="#0d1426" stroke="#77e8c1" stroke-width="3"/>
+  <path d="m50.5 49.5 6 6" stroke="#77e8c1" stroke-width="4" stroke-linecap="round"/>
+</svg>
