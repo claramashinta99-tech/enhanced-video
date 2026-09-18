@@ -3,3 +3,4 @@ uvicorn[standard]==0.35.0
 yt-dlp[default,curl-cffi] @ https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/2026.08.30.232658/yt-dlp.tar.gz
 yt-dlp-ejs
 bgutil-ytdlp-pot-provider==2.0.0
+python-multipart>=0.0.20,<1
