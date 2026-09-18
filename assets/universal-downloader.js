@@ -80,7 +80,7 @@
       const r=await fetch(API+jobPath,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url,quality:quality.value||'best'}),cache:'no-store'});const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok||!data.job_id)throw new Error(data.detail||text('Gagal memulai proses.','Could not start processing.'));await poll(data.job_id,run,family);
     }catch(e){if(run!==downloadRun)return;console.error(e);hideProgress();setStatus(e.message||text('Download gagal.','Download failed.'),'error');downloadBtn.disabled=false;quality.disabled=false;downloadBtn.textContent='Download'}
   }
-  inspectBtn.addEventListener('click',inspect);downloadBtn.addEventListener('click',download);input.addEventListener('keydown',e=>{if(e.key==='Enter')inspect()});input.addEventListener('input',()=>{const kind=detect(input.value.trim());highlight(kind?.platform||'');if(current&&input.value.trim()!==current.url){++inspectRun;++downloadRun;if(inspectController)inspectController.abort();reset()}});
+  inspectBtn.addEventListener('click',inspect);downloadBtn.addEventListener('click',download);input.addEventListener('keydown',e=>{if(e.key==='Enter')inspect()});input.addEventListener('input',()=>{const kind=detect(input.value.trim());if(current&&input.value.trim()!==current.url){++inspectRun;++downloadRun;if(inspectController)inspectController.abort();reset()}highlight(kind?.platform||'')});
   window.addEventListener('reyval:lang',applyCopy);applyCopy();
   const initial=new URLSearchParams(location.search).get('url');if(initial){input.value=initial;const kind=detect(initial);highlight(kind?.platform||'');setTimeout(inspect,0)}
 })();
