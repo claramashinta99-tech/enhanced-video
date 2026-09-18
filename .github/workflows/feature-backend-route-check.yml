@@ -28,6 +28,8 @@ jobs:
           PY
       - name: Verify ffprobe metadata path
         run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
           which ffprobe
           ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=black:s=320x180:d=1 -f lavfi -i sine=frequency=440:duration=1 -shortest -c:v libx264 -c:a aac /tmp/rvl-test.mp4
           cd backend
