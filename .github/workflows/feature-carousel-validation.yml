@@ -58,3 +58,15 @@ jobs:
           assert video['kind']=='video' and video['_url'].endswith('.mp4')
           print('helpers ok')
           PY
+      - name: Live TikTok slideshow resolver smoke
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import carousel_routes as c
+          url='https://www.tiktok.com/t/ZTSdULQgX/'
+          info=c.extract_carousel_info(url,'tiktok')
+          assert info['platform']=='tiktok'
+          assert len(info['items'])>=1
+          assert all(x['kind']=='image' for x in info['items'])
+          print('tiktok slideshow items',len(info['items']),'audio',info['has_audio'])
+          PY
