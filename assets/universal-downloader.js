@@ -82,4 +82,5 @@
   }
   inspectBtn.addEventListener('click',inspect);downloadBtn.addEventListener('click',download);input.addEventListener('keydown',e=>{if(e.key==='Enter')inspect()});input.addEventListener('input',()=>{const kind=detect(input.value.trim());highlight(kind?.platform||'');if(current&&input.value.trim()!==current.url){++inspectRun;++downloadRun;if(inspectController)inspectController.abort();reset()}});
   window.addEventListener('reyval:lang',applyCopy);applyCopy();
+  const initial=new URLSearchParams(location.search).get('url');if(initial){input.value=initial;const kind=detect(initial);highlight(kind?.platform||'');setTimeout(inspect,0)}
 })();
