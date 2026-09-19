@@ -26,7 +26,6 @@ _ANSI = re.compile(r'\x1b\[[0-9;]*m')
 _SELFTEST_URL = 'https://www.youtube.com/watch?v=Xh7I5J8eDQY'
 _KNOWN_URL = _SELFTEST_URL
 _YOUTUBE_VIDEO_MAX_FILESIZE = int(os.getenv('YOUTUBE_VIDEO_MAX_FILESIZE', str(2 * 1024 * 1024 * 1024)))
-_YOUTUBE_TEMP_FALLBACK_MAX_BYTES = int(os.getenv('YOUTUBE_TEMP_FALLBACK_MAX_BYTES', str(350 * 1024 * 1024)))
 
 
 def _clean_text(value, limit=420):
@@ -90,147 +89,6 @@ def _probe_stream_types(path):
         return {line.strip().lower() for line in raw.splitlines() if line.strip()}
     except Exception:
         return set()
-
-
-
-def _fmt_number(value):
-    try:
-        return float(value or 0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _fmt_size(value):
-    try:
-        return int(value.get('filesize') or value.get('filesize_approx') or 0)
-    except Exception:
-        return 0
-
-
-def _youtube_stream_pair(info, quality):
-    formats = [
-        item for item in (info.get('formats') or [])
-        if isinstance(item, dict) and isinstance(item.get('url'), str) and item.get('url')
-    ]
-    videos = [
-        item for item in formats
-        if str(item.get('vcodec') or '').lower() not in {'', 'none'}
-    ]
-    audios = [
-        item for item in formats
-        if str(item.get('vcodec') or '').lower() in {'', 'none'}
-        and str(item.get('acodec') or '').lower() not in {'', 'none'}
-    ]
-    if not videos or not audios:
-        raise RuntimeError('YouTube direct video/audio URLs unavailable')
-
-    if quality in legacy.EXACT_QUALITIES:
-        wanted = legacy.EXACT_QUALITIES[quality]
-        videos = [item for item in videos if int(item.get('height') or 0) == wanted]
-        if not videos:
-            raise RuntimeError(f'exact {wanted}p direct video URL unavailable')
-
-    def video_rank(item):
-        width = int(item.get('width') or 0)
-        height = int(item.get('height') or 0)
-        fps = _fmt_number(item.get('fps'))
-        ext = str(item.get('ext') or '').lower()
-        mp4_pref = 1 if ext in {'mp4', 'm4v'} else 0
-        return height, width, fps, mp4_pref, _fmt_number(item.get('tbr') or item.get('vbr')), _fmt_size(item)
-
-    def audio_rank(item):
-        ext = str(item.get('ext') or '').lower()
-        m4a_pref = 1 if ext in {'m4a', 'mp4'} else 0
-        return m4a_pref, _fmt_number(item.get('abr') or item.get('tbr')), _fmt_size(item)
-
-    return max(videos, key=video_rank), max(audios, key=audio_rank)
-
-
-def _youtube_pair_estimated_bytes(info, video, audio):
-    total = _fmt_size(video) + _fmt_size(audio)
-    if total:
-        return total
-    duration = _fmt_number(info.get('duration'))
-    bitrate = _fmt_number(video.get('tbr') or video.get('vbr')) + _fmt_number(audio.get('abr') or audio.get('tbr'))
-    return int(duration * bitrate * 1000 / 8) if duration and bitrate else 0
-
-
-def _ffmpeg_input_args(fmt):
-    headers = dict(fmt.get('http_headers') or {})
-    user_agent = str(headers.pop('User-Agent', '') or headers.pop('user-agent', '') or legacy.YOUTUBE_UA)
-    extra_headers = []
-    for key, value in headers.items():
-        key = str(key).strip()
-        value = str(value).replace('\r', '').replace('\n', '').strip()
-        if not key or not value or key.lower() in {'range', 'accept-encoding'}:
-            continue
-        extra_headers.append(f'{key}: {value}')
-    args = ['-rw_timeout', '30000000', '-user_agent', user_agent]
-    if extra_headers:
-        args += ['-headers', '\r\n'.join(extra_headers) + '\r\n']
-    args += ['-i', str(fmt['url'])]
-    return args
-
-
-def _safe_youtube_name(info):
-    title = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', ' ', str(info.get('title') or 'youtube-video')).strip()
-    title = re.sub(r'\s+', ' ', title)[:80] or 'youtube-video'
-    video_id = str(info.get('id') or '').strip()
-    suffix = f' [{video_id}]' if video_id else ''
-    return f'{title}{suffix}.mp4'
-
-
-def _stream_merge_youtube(info, quality, workdir, job_id=None):
-    video, audio = _youtube_stream_pair(info, quality)
-    estimated = _youtube_pair_estimated_bytes(info, video, audio)
-    if estimated and estimated > _YOUTUBE_VIDEO_MAX_FILESIZE:
-        raise RuntimeError('YouTube direct output exceeds maximum file size')
-
-    target = Path(workdir) / _safe_youtube_name(info)
-    if target.exists():
-        target.unlink()
-
-    if job_id:
-        legacy.job_update(job_id, state='working', progress=18, stage='Streaming video + audio')
-
-    common = ['ffmpeg', '-y', '-v', 'error']
-    inputs = _ffmpeg_input_args(video) + _ffmpeg_input_args(audio)
-    copy_cmd = common + inputs + [
-        '-map', '0:v:0', '-map', '1:a:0',
-        '-c:v', 'copy', '-c:a', 'copy',
-        '-movflags', '+faststart',
-        str(target),
-    ]
-    run = subprocess.run(copy_cmd, capture_output=True, text=True, timeout=1800)
-    if run.returncode != 0:
-        target.unlink(missing_ok=True)
-        aac_cmd = common + inputs + [
-            '-map', '0:v:0', '-map', '1:a:0',
-            '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
-            '-movflags', '+faststart',
-            str(target),
-        ]
-        run = subprocess.run(aac_cmd, capture_output=True, text=True, timeout=1800)
-        if run.returncode != 0:
-            target.unlink(missing_ok=True)
-            detail = _clean_text(run.stderr or run.stdout, 500)
-            raise RuntimeError(f'YouTube direct stream merge failed: {detail}')
-
-    if not target.is_file() or target.stat().st_size < 1024:
-        raise RuntimeError('YouTube direct merged output missing')
-    if target.stat().st_size > _YOUTUBE_VIDEO_MAX_FILESIZE:
-        target.unlink(missing_ok=True)
-        raise RuntimeError('YouTube direct output exceeds maximum file size')
-
-    stream_types = _probe_stream_types(target)
-    if 'video' not in stream_types or 'audio' not in stream_types:
-        target.unlink(missing_ok=True)
-        raise RuntimeError('YouTube direct merged output invalid')
-
-    if job_id:
-        legacy.job_update(job_id, state='working', progress=94, stage='Finalisasi')
-    return target, estimated
-
 
 
 def _manual_merge_youtube(workdir):
@@ -340,30 +198,6 @@ def download_from_info(url, quality, workdir, info, strategy, job_id=None):
         fmt = legacy.best_audio_selector(info)
 
     legacy.clear_workdir(workdir)
-
-    if quality != 'audio':
-        direct_error = None
-        estimated = 0
-        try:
-            path, estimated = _stream_merge_youtube(info, quality, workdir, job_id)
-            legacy.verify_file_quality(path, quality)
-            return legacy.add_quality_suffix(path, quality)
-        except Exception as exc:
-            direct_error = exc
-            try:
-                video, audio = _youtube_stream_pair(info, quality)
-                estimated = _youtube_pair_estimated_bytes(info, video, audio)
-            except Exception:
-                estimated = 0
-            print(
-                f'youtube low-disk merge failed quality={quality} '
-                f'estimated={estimated} error={_clean_error(exc)}',
-                flush=True,
-            )
-            legacy.clear_workdir(workdir)
-            if estimated and estimated > _YOUTUBE_TEMP_FALLBACK_MAX_BYTES:
-                raise RuntimeError(f'YouTube low-disk merge failed: {direct_error}') from direct_error
-
     opts = legacy.dl_opts(url, quality, workdir, strategy, fmt, job_id)
     if quality != 'audio':
         opts['max_filesize'] = _YOUTUBE_VIDEO_MAX_FILESIZE
@@ -537,7 +371,7 @@ legacy.youtube_attempts = youtube_attempts
 legacy.extract_info_sync = extract_info_sync
 legacy.download_from_info = download_from_info
 legacy.youtube_error = youtube_error
-legacy.APP_VERSION = '1.15.9'
+legacy.APP_VERSION = '1.15.8'
 app.version = legacy.APP_VERSION
 
 
