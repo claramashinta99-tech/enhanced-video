@@ -26,15 +26,37 @@ $$('#target button').forEach(btn=>btn.addEventListener('click',()=>{if(busy)retu
 $$('.mode').forEach(el=>el.addEventListener('click',()=>{if(busy)return;mode=el.dataset.mode;$$('.mode').forEach(x=>x.classList.toggle('active',x===el));$('#mode-spec').textContent=t().modeNames[mode];resetResult()}));
 function setSafeArea(on){$('#safe-guides').classList.toggle('show',on);$('#safe-toggle').classList.toggle('on',on);$$('#safe-segment button').forEach(b=>b.classList.toggle('active',(b.dataset.safe==='on')===on))}
 $('#safe-toggle').addEventListener('click',()=>setSafeArea(!$('#safe-toggle').classList.contains('on')));$$('#safe-segment button').forEach(btn=>btn.addEventListener('click',()=>setSafeArea(btn.dataset.safe==='on')));$$('#preview-source-toggle button').forEach(btn=>btn.addEventListener('click',()=>showPreview(btn.dataset.source)));
-async function toBlobURL(url,mimeType){const res=await fetch(url);if(!res.ok)throw new Error(`HTTP ${res.status} ${url}`);const blob=await res.blob();return URL.createObjectURL(new Blob([blob],{type:mimeType}))}
+async function toBlobURL(url,mimeType){
+ const r=await fetch(url,{cache:'force-cache'});if(!r.ok)throw new Error(`HTTP ${r.status} ${url}`);const b=await r.blob();return URL.createObjectURL(new Blob([b],{type:mimeType}));
+}
+async function toPatchedBlobURL(url,mimeType){
+ const r=await fetch(url,{cache:'force-cache'});if(!r.ok)throw new Error(`HTTP ${r.status} ${url}`);let js=await r.text();
+ js=js.replace('new URL(e.p+e.u(814),e.b)','r.workerLoadURL');
+ return URL.createObjectURL(new Blob([js],{type:mimeType}));
+}
+async function loadFFmpegFrom(baseMain,baseCore){
+ if(!window.FFmpegWASM){
+  const mainURL=await toPatchedBlobURL(`${baseMain}/ffmpeg.js`,'text/javascript');
+  await import(mainURL);
+ }
+ if(!window.FFmpegWASM?.FFmpeg)throw new Error('FFmpegWASM global missing');
+ ffmpeg=new window.FFmpegWASM.FFmpeg();
+ ffmpeg.on('progress',({progress})=>setProgress(Math.max(8,Math.min(96,(progress||0)*100))));
+ const workerLoadURL=await toBlobURL(`${baseMain}/814.ffmpeg.js`,'text/javascript');
+ const coreURL=await toBlobURL(`${baseCore}/ffmpeg-core.js`,'text/javascript');
+ const wasmURL=await toBlobURL(`${baseCore}/ffmpeg-core.wasm`,'application/wasm');
+ await ffmpeg.load({workerLoadURL,coreURL,wasmURL});
+}
 async function ensureFFmpeg(){
  if(ffmpegLoaded)return;
- const cdns=[
-  {esm:'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js',core:'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js',wasm:'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm',worker:'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.worker.js'},
-  {esm:'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js',core:'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js',wasm:'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm',worker:'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.worker.js'}
+ const sources=[
+  ['https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.6/dist/umd','https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.3/dist/umd'],
+  ['https://unpkg.com/@ffmpeg/ffmpeg@0.12.6/dist/umd','https://unpkg.com/@ffmpeg/core@0.12.3/dist/umd']
  ];
  let lastErr;
- for(const cdn of cdns){try{const {FFmpeg}=await import(/* @vite-ignore */ `${cdn.esm}?v=3`);ffmpeg=new FFmpeg();ffmpeg.on('progress',({progress})=>setProgress(Math.max(8,Math.min(96,progress*100))));await ffmpeg.load({coreURL:await toBlobURL(`${cdn.core}?v=3`,'text/javascript'),wasmURL:await toBlobURL(`${cdn.wasm}?v=3`,'application/wasm'),workerURL:await toBlobURL(`${cdn.worker}?v=3`,'text/javascript')});ffmpegLoaded=true;return}catch(err){lastErr=err;ffmpegLoaded=false;ffmpeg=null}}
+ for(const [main,core] of sources){
+  try{await loadFFmpegFrom(main,core);ffmpegLoaded=true;return}catch(err){console.warn('FFmpeg source failed',main,err);lastErr=err;try{ffmpeg?.terminate?.()}catch{}ffmpeg=null}
+ }
  throw lastErr||new Error('Unable to load FFmpeg');
 }
 
