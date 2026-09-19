@@ -56,7 +56,7 @@
         setProgress(100,t('Sip, mulai didownload…','Nice, download starting…'));frame.src=`${API}/api/audio/chunked/${encodeURIComponent(data.token)}?_=${Date.now()}`;setTimeout(()=>{if(run===downloadRun)hideProgress()},1200);
       }else{
         setProgress(5,guessStage(5));
-        const r=await fetch(`${API}/api/mp3/jobs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url,quality:'audio'}),cache:'no-store'});const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok||!data.job_id)throw new Error(data.detail||t('Gagal memulai MP3.','Could not start MP3 processing.'));
+        const r=await fetch(`${API}/api/jobs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url,quality:'audio'}),cache:'no-store'});const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok||!data.job_id)throw new Error(data.detail||t('Gagal memulai MP3.','Could not start MP3 processing.'));
         await poll(data.job_id,run);
       }
     }catch(e){if(run===downloadRun){console.error(e);hideProgress();setStatus(e.message||t('Download gagal.','Download failed.'),'error')}}
