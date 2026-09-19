@@ -25,6 +25,7 @@ _ORIGINAL_DOWNLOAD_FROM_INFO = legacy.download_from_info
 _ANSI = re.compile(r'\x1b\[[0-9;]*m')
 _SELFTEST_URL = 'https://www.youtube.com/watch?v=Xh7I5J8eDQY'
 _KNOWN_URL = _SELFTEST_URL
+_YOUTUBE_VIDEO_MAX_FILESIZE = int(os.getenv('YOUTUBE_VIDEO_MAX_FILESIZE', str(2 * 1024 * 1024 * 1024)))
 
 
 def _clean_text(value, limit=420):
@@ -90,6 +91,64 @@ def _probe_stream_types(path):
         return set()
 
 
+def _manual_merge_youtube(workdir):
+    files = [
+        path for path in Path(workdir).iterdir()
+        if path.is_file()
+        and path.stat().st_size > 1024
+        and not path.name.endswith(('.part', '.ytdl', '.temp'))
+    ]
+    videos = []
+    audios = []
+    for path in files:
+        stream_types = _probe_stream_types(path)
+        if 'video' in stream_types and 'audio' not in stream_types:
+            width, height = legacy.probe_dimensions(path)
+            videos.append(((height, width, path.stat().st_size), path))
+        elif 'audio' in stream_types and 'video' not in stream_types:
+            audios.append((path.stat().st_size, path))
+
+    if not videos or not audios:
+        raise RuntimeError('YouTube separate video/audio streams unavailable')
+
+    video = max(videos, key=lambda item: item[0])[1]
+    audio = max(audios, key=lambda item: item[0])[1]
+    stem = re.sub(r'\.f\d+$', '', video.stem, flags=re.I)
+    target = Path(workdir) / f'{stem}.mp4'
+    if target.exists():
+        target.unlink()
+
+    copy_cmd = [
+        'ffmpeg', '-y', '-v', 'error',
+        '-i', str(video), '-i', str(audio),
+        '-map', '0:v:0', '-map', '1:a:0',
+        '-c', 'copy', '-movflags', '+faststart',
+        str(target),
+    ]
+    copy_run = subprocess.run(copy_cmd, capture_output=True, text=True, timeout=180)
+    if copy_run.returncode != 0:
+        if target.exists():
+            target.unlink()
+        aac_cmd = [
+            'ffmpeg', '-y', '-v', 'error',
+            '-i', str(video), '-i', str(audio),
+            '-map', '0:v:0', '-map', '1:a:0',
+            '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+            '-movflags', '+faststart',
+            str(target),
+        ]
+        aac_run = subprocess.run(aac_cmd, capture_output=True, text=True, timeout=240)
+        if aac_run.returncode != 0:
+            raise RuntimeError('YouTube manual merge failed')
+
+    if not target.is_file() or target.stat().st_size < 1024:
+        raise RuntimeError('YouTube merged output missing')
+    stream_types = _probe_stream_types(target)
+    if 'video' not in stream_types or 'audio' not in stream_types:
+        raise RuntimeError('YouTube merged output invalid')
+    return target
+
+
 def _youtube_output_file(workdir, quality):
     files = [
         path for path in Path(workdir).iterdir()
@@ -121,14 +180,11 @@ def _youtube_output_file(workdir, quality):
             has_audio,
         ))
 
-    if not candidates:
-        raise RuntimeError('YouTube video output unavailable')
-
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    path = candidates[0][1]
-    if not candidates[0][2]:
-        raise RuntimeError('YouTube merged video+audio output unavailable')
-    return path
+    merged = [item for item in candidates if item[2]]
+    if merged:
+        merged.sort(key=lambda item: item[0], reverse=True)
+        return merged[0][1]
+    return _manual_merge_youtube(workdir)
 
 
 def download_from_info(url, quality, workdir, info, strategy, job_id=None):
@@ -142,12 +198,26 @@ def download_from_info(url, quality, workdir, info, strategy, job_id=None):
         fmt = legacy.best_audio_selector(info)
 
     legacy.clear_workdir(workdir)
-    with YoutubeDL(legacy.dl_opts(url, quality, workdir, strategy, fmt, job_id)) as ydl:
+    opts = legacy.dl_opts(url, quality, workdir, strategy, fmt, job_id)
+    if quality != 'audio':
+        opts['max_filesize'] = _YOUTUBE_VIDEO_MAX_FILESIZE
+    with YoutubeDL(opts) as ydl:
         ydl.process_ie_result(copy.deepcopy(info), download=True)
 
     path = _youtube_output_file(workdir, quality)
     legacy.verify_file_quality(path, quality)
     return legacy.add_quality_suffix(path, quality)
+
+
+def youtube_error(exc):
+    message = str(exc).lower()
+    if 'sign in' in message or 'not a bot' in message or 'login' in message:
+        return 'YouTube menolak sesi server. Coba lagi atau perbarui cookie YouTube jika diperlukan.'
+    if 'filesize' in message or 'too large' in message or 'maximum file size' in message:
+        return 'File video YouTube terlalu besar untuk diproses server.'
+    if 'merge' in message or 'video output' in message or 'stream' in message:
+        return 'YouTube gagal menyatukan stream video dan audio. Coba lagi.'
+    return 'YouTube gagal menyiapkan file video. Coba lagi.'
 
 
 def extract_info_sync(url):
@@ -300,7 +370,8 @@ legacy.base_opts = base_opts
 legacy.youtube_attempts = youtube_attempts
 legacy.extract_info_sync = extract_info_sync
 legacy.download_from_info = download_from_info
-legacy.APP_VERSION = '1.15.7'
+legacy.youtube_error = youtube_error
+legacy.APP_VERSION = '1.15.8'
 app.version = legacy.APP_VERSION
 
 
