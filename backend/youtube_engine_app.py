@@ -21,7 +21,9 @@ app = base.app
 legacy = base.legacy
 
 _ORIGINAL_BASE_OPTS = legacy.base_opts
+_ORIGINAL_EXTRACT_INFO_SYNC = legacy.extract_info_sync
 _ORIGINAL_DOWNLOAD_FROM_INFO = legacy.download_from_info
+_ORIGINAL_DOWNLOAD_SYNC = legacy.download_sync
 _ANSI = re.compile(r'\x1b\[[0-9;]*m')
 _SELFTEST_URL = 'https://www.youtube.com/watch?v=Xh7I5J8eDQY'
 _KNOWN_URL = _SELFTEST_URL
@@ -70,6 +72,64 @@ def base_opts(url=None, clients=None, use_cookie=True):
     opts['retries'] = 0
     opts['fragment_retries'] = 1
     opts['extractor_retries'] = 0
+    return opts
+
+
+
+
+def _stable_youtube_attempts():
+    if legacy.youtube_cookie_ready():
+        return [
+            {'name': 'mweb-cookie', 'clients': ['mweb'], 'cookie': True},
+            {'name': 'default-cookie', 'clients': ['default', 'mweb'], 'cookie': True},
+            {'name': 'safari-cookie', 'clients': ['default', 'web_safari'], 'cookie': True},
+            {'name': 'mweb-public', 'clients': ['mweb'], 'cookie': False},
+            {'name': 'embedded-public', 'clients': ['web_embedded'], 'cookie': False},
+            {'name': 'android-vr', 'clients': ['android_vr'], 'cookie': False, 'selector': 'best/18'},
+        ]
+    return [
+        {'name': 'mweb-public', 'clients': ['mweb'], 'cookie': False},
+        {'name': 'embedded-public', 'clients': ['web_embedded'], 'cookie': False},
+        {'name': 'android-vr', 'clients': ['android_vr'], 'cookie': False, 'selector': 'best/18'},
+    ]
+
+
+def _stable_opts(url, strategy):
+    opts = _ORIGINAL_BASE_OPTS(
+        url,
+        strategy.get('clients'),
+        strategy.get('cookie', False),
+    )
+    opts['socket_timeout'] = 25
+    opts['retries'] = 2
+    opts['fragment_retries'] = 2
+    return opts
+
+
+def _stable_dl_opts(url, quality, workdir, strategy, job_id=None):
+    fmt, audio = legacy.selector(quality)
+    if strategy.get('selector') and quality == 'best':
+        fmt = strategy['selector']
+
+    opts = _stable_opts(url, strategy)
+    opts.update({
+        'format': fmt,
+        'outtmpl': str(Path(workdir) / '%(title).80B [%(id)s].%(ext)s'),
+        'merge_output_format': 'mp4',
+        'windowsfilenames': True,
+    })
+    if quality != 'audio':
+        opts['max_filesize'] = _YOUTUBE_VIDEO_MAX_FILESIZE
+    if job_id:
+        hooks, posts = legacy.make_progress_hooks(job_id, quality)
+        opts['progress_hooks'] = hooks
+        opts['postprocessor_hooks'] = posts
+    if audio:
+        opts['postprocessors'] = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }]
     return opts
 
 
@@ -209,6 +269,54 @@ def download_from_info(url, quality, workdir, info, strategy, job_id=None):
     return legacy.add_quality_suffix(path, quality)
 
 
+
+def download_sync(url, quality, workdir, job_id=None):
+    if not legacy.is_youtube(url):
+        return _ORIGINAL_DOWNLOAD_SYNC(url, quality, workdir, job_id)
+
+    cached = legacy.cache_get(url)
+    attempts = _stable_youtube_attempts()
+    if cached:
+        preferred = cached['strategy'].get('name')
+        attempts.sort(key=lambda item: 0 if item.get('name') == preferred else 1)
+
+    errors = []
+    if job_id:
+        legacy.job_update(job_id, state='working', progress=8, stage='Menyiapkan')
+
+    for strategy in attempts:
+        try:
+            if job_id:
+                legacy.job_update(job_id, state='working', progress=10, stage='Membaca sumber')
+            legacy.clear_workdir(workdir)
+            opts = _stable_dl_opts(url, quality, workdir, strategy, job_id)
+            with YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+            if info and info.get('entries'):
+                info = next((item for item in info['entries'] if item), info)
+            path = _youtube_output_file(workdir, quality)
+            legacy.verify_file_quality(path, quality)
+            if info:
+                legacy.cache_put(url, info, strategy)
+            return legacy.add_quality_suffix(path, quality)
+        except Exception as exc:
+            errors.append(f'{strategy["name"]}:{type(exc).__name__}')
+            print(
+                f'youtube stable download failed host={urlparse(url).hostname} '
+                f'quality={quality} strategy={strategy["name"]} '
+                f'error={_clean_error(exc)}',
+                flush=True,
+            )
+
+    print(
+        f'youtube stable download exhausted host={urlparse(url).hostname} '
+        f'quality={quality} attempts={",".join(errors)}',
+        flush=True,
+    )
+    raise DownloadError('download failed')
+
+
+
 def youtube_error(exc):
     message = str(exc).lower()
     if 'sign in' in message or 'not a bot' in message or 'login' in message:
@@ -225,14 +333,13 @@ def extract_info_sync(url):
     if cached:
         return cached['info']
 
-    attempts = youtube_attempts() if legacy.is_youtube(url) else [
-        {'name': 'default', 'clients': None, 'cookie': False}
-    ]
-    errors = []
+    if not legacy.is_youtube(url):
+        return _ORIGINAL_EXTRACT_INFO_SYNC(url)
 
-    for strategy in attempts:
+    errors = []
+    for strategy in _stable_youtube_attempts():
         try:
-            opts = base_opts(url, strategy.get('clients'), strategy.get('cookie', False))
+            opts = _stable_opts(url, strategy)
             opts['skip_download'] = True
             with YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False, process=False)
@@ -240,19 +347,25 @@ def extract_info_sync(url):
                 if info.get('entries'):
                     info = next((item for item in info['entries'] if item), info)
                 legacy.cache_put(url, info, strategy)
-                print(f'youtube info ok host={urlparse(url).hostname} strategy={strategy["name"]}', flush=True)
+                print(
+                    f'youtube stable info ok host={urlparse(url).hostname} '
+                    f'strategy={strategy["name"]}',
+                    flush=True,
+                )
                 return info
         except Exception as exc:
             detail = _clean_error(exc)
             errors.append(f'{strategy["name"]}={detail}')
             print(
-                f'youtube attempt failed host={urlparse(url).hostname} '
+                f'youtube stable info failed host={urlparse(url).hostname} '
                 f'strategy={strategy["name"]} error={detail}',
                 flush=True,
             )
 
-    joined = ' | '.join(errors)
-    print(f'media info failed host={urlparse(url).hostname} details={joined}', flush=True)
+    print(
+        f'media info failed host={urlparse(url).hostname} details={" | ".join(errors)}',
+        flush=True,
+    )
     raise DownloadError('media info failed')
 
 
@@ -370,8 +483,9 @@ legacy.base_opts = base_opts
 legacy.youtube_attempts = youtube_attempts
 legacy.extract_info_sync = extract_info_sync
 legacy.download_from_info = download_from_info
+legacy.download_sync = download_sync
 legacy.youtube_error = youtube_error
-legacy.APP_VERSION = '1.15.8'
+legacy.APP_VERSION = '1.15.10'
 app.version = legacy.APP_VERSION
 
 
