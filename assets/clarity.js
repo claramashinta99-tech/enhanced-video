@@ -65,19 +65,36 @@ async function execChecked(args){
  if(typeof code==='number'&&code!==0)throw new Error(`FFmpeg exited with code ${code}`);
 }
 async function deleteLocal(name){try{await ffmpeg.deleteFile(name)}catch{}}
-async function runReference(input,output,brand='mp42'){
- await execChecked(['-i',input,'-map','0:v:0','-map','0:a?','-c','copy','-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-avoid_negative_ts','make_zero','-brand',brand,output]);
-}
-async function runMaxQualityFps(input,output){
- // Keep the source bitstreams untouched. The re-encode path was causing
- // visible quality loss after TikTok processing. This mirrors the previously
- // stable Clarity HQ behavior: remux only, fast-start, no FPS/codec rewrite.
+async function runReference(input,output){
  await execChecked([
   '-i',input,
   '-map','0:v:0',
-  '-map','0:a:0?',
+  '-map','0:a?',
   '-c','copy',
+  '-map_metadata','-1',
   '-movflags','+faststart',
+  '-metadata','comment=Prepared with Clarity by Reyval',
+  output
+ ]);
+}
+async function runMaxQualityFps(input,output){
+ // "120 FPS" is a ceiling, not an instruction to create 120 FPS.
+ // Preserve the source frame rate (60 stays 60, 120 stays 120) and only
+ // remux the streams. This avoids the quality loss from forced interpolation
+ // or re-encoding while keeping the MP4 delivery structure clean.
+ await execChecked([
+  '-i',input,
+  '-map','0:v:0',
+  '-map','0:a?',
+  '-c','copy',
+  '-fps_mode','passthrough',
+  '-video_track_timescale','90000',
+  '-map_metadata','-1',
+  '-map_chapters','-1',
+  '-movflags','+faststart',
+  '-brand','isom',
+  '-tag:v','avc1',
+  '-metadata','comment=Max Quality + FPS Method',
   output
  ]);
  return true;
