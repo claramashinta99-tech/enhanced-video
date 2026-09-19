@@ -353,6 +353,11 @@ def _download_direct(url, target, platform, referer, job_id=None, progress_base=
 
 def _download_instagram_with_ytdlp(url, item_index, workdir, job_id=None):
     opts = social._base_opts('instagram', quality='best', workdir=workdir, job_id=job_id)
+    # Carousel entries can be photos. The shared social defaults force a
+    # video-only format selector, which makes yt-dlp reject image entries
+    # whenever the direct CDN path needs this fallback.
+    opts.pop('format', None)
+    opts.pop('merge_output_format', None)
     opts['noplaylist'] = False
     opts['playlist_items'] = str(item_index)
     opts['outtmpl'] = str(Path(workdir) / f'{item_index:02d} - %(title).60B [%(id)s].%(ext)s')
