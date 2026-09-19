@@ -66,10 +66,13 @@ async function execChecked(args){
 }
 async function deleteLocal(name){try{await ffmpeg.deleteFile(name)}catch{}}
 
+async function runReference(input,output,brand='mp42'){
+ await execChecked(['-i',input,'-map','0:v:0','-map','0:a?','-c','copy','-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-avoid_negative_ts','make_zero','-brand',brand,output]);
+}
+
 async function runMaxQualityFps(input,output){
- // 120 FPS is the maximum supported frame rate, not a forced target.
- // The source video stream is copied untouched; the AAC patch mirrors the
- // CompressBase-style container/track structure without generating frames.
+ // 120 FPS is a ceiling: 60fps input stays 60fps; 120fps input stays 120fps.
+ // Preserve the video stream and use the CompressBase-style AAC track patch.
 
  const mainAac='rvl-main.aac',patchAac='rvl-fps-patch.aac';
  let patchApplied=false;
