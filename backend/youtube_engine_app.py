@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import os
 import re
@@ -7,6 +8,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
@@ -19,6 +21,7 @@ app = base.app
 legacy = base.legacy
 
 _ORIGINAL_BASE_OPTS = legacy.base_opts
+_ORIGINAL_DOWNLOAD_FROM_INFO = legacy.download_from_info
 _ANSI = re.compile(r'\x1b\[[0-9;]*m')
 _SELFTEST_URL = 'https://www.youtube.com/watch?v=Xh7I5J8eDQY'
 _KNOWN_URL = _SELFTEST_URL
@@ -67,6 +70,84 @@ def base_opts(url=None, clients=None, use_cookie=True):
     opts['fragment_retries'] = 1
     opts['extractor_retries'] = 0
     return opts
+
+
+
+def _probe_stream_types(path):
+    try:
+        raw = subprocess.check_output(
+            [
+                'ffprobe', '-v', 'error',
+                '-show_entries', 'stream=codec_type',
+                '-of', 'csv=p=0',
+                str(path),
+            ],
+            text=True,
+            timeout=15,
+        )
+        return {line.strip().lower() for line in raw.splitlines() if line.strip()}
+    except Exception:
+        return set()
+
+
+def _youtube_output_file(workdir, quality):
+    files = [
+        path for path in Path(workdir).iterdir()
+        if path.is_file()
+        and path.stat().st_size > 1024
+        and not path.name.endswith(('.part', '.ytdl', '.temp'))
+    ]
+    if not files:
+        raise RuntimeError('YouTube output file unavailable')
+
+    if quality == 'audio':
+        return legacy.find_output(workdir)
+
+    candidates = []
+    for path in files:
+        stream_types = _probe_stream_types(path)
+        if 'video' not in stream_types:
+            continue
+        has_audio = 'audio' in stream_types
+        format_fragment = bool(re.search(r'\.f\d+\.[^.]+$', path.name, re.I))
+        candidates.append((
+            (
+                1 if has_audio else 0,
+                1 if not format_fragment else 0,
+                path.stat().st_size,
+                path.stat().st_mtime,
+            ),
+            path,
+            has_audio,
+        ))
+
+    if not candidates:
+        raise RuntimeError('YouTube video output unavailable')
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    path = candidates[0][1]
+    if not candidates[0][2]:
+        raise RuntimeError('YouTube merged video+audio output unavailable')
+    return path
+
+
+def download_from_info(url, quality, workdir, info, strategy, job_id=None):
+    if not legacy.is_youtube(url):
+        return _ORIGINAL_DOWNLOAD_FROM_INFO(url, quality, workdir, info, strategy, job_id)
+
+    fmt = legacy.exact_selector(info, quality)
+    if quality in legacy.EXACT_QUALITIES and not fmt:
+        raise RuntimeError(f'exact {quality}p format not present')
+    if quality == 'audio':
+        fmt = legacy.best_audio_selector(info)
+
+    legacy.clear_workdir(workdir)
+    with YoutubeDL(legacy.dl_opts(url, quality, workdir, strategy, fmt, job_id)) as ydl:
+        ydl.process_ie_result(copy.deepcopy(info), download=True)
+
+    path = _youtube_output_file(workdir, quality)
+    legacy.verify_file_quality(path, quality)
+    return legacy.add_quality_suffix(path, quality)
 
 
 def extract_info_sync(url):
@@ -218,7 +299,8 @@ def _network_selftest():
 legacy.base_opts = base_opts
 legacy.youtube_attempts = youtube_attempts
 legacy.extract_info_sync = extract_info_sync
-legacy.APP_VERSION = '1.15.6'
+legacy.download_from_info = download_from_info
+legacy.APP_VERSION = '1.15.7'
 app.version = legacy.APP_VERSION
 
 
