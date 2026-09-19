@@ -6,37 +6,44 @@ jobs:
   diag:
     runs-on: ubuntu-latest
     timeout-minutes: 8
-    env:
-      API: https://rvl-api.onrender.com
-      SHORT: https://www.youtube.com/watch?v=sbZCJrZFJpM
     steps:
-      - name: Shorts info
+      - name: Verify live MP3 frontend
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS -L --max-time 90 -H 'Content-Type: application/json' -d "{\"url\":\"$SHORT\"}" "$API/api/info" | tee /tmp/info.json
-          python - <<'PY'
-          import json
-          x=json.load(open('/tmp/info.json'))
-          assert x.get('platform')=='youtube'
-          assert x.get('id')=='sbZCJrZFJpM'
-          print(x.get('title'), x.get('max_height'))
-          PY
-      - name: Shorts best job
+          OK=0
+          for i in $(seq 1 72); do
+            PAGE=$(curl -fsS -L --max-time 30 'https://reyval.web.id/youtube-mp3/' || true)
+            JS=$(curl -fsS -L --max-time 30 'https://reyval.web.id/assets/mp3.js?v=14' || true)
+            BRIDGE=$(curl -fsS -L --max-time 30 'https://reyval.web.id/assets/api-railway.js?v=4' || true)
+            if echo "$PAGE" | grep -q 'mp3.js?v=14' \
+              && echo "$JS" | grep -q "/api/jobs" \
+              && ! echo "$JS" | grep -q "/api/mp3/jobs" \
+              && echo "$BRIDGE" | grep -q "isYouTubePage" \
+              && echo "$BRIDGE" | grep -q "rvl-api.onrender.com"; then
+              echo LIVE_MP3_ROUTE_OK
+              OK=1
+              break
+            fi
+            sleep 5
+          done
+          [ "$OK" = 1 ]
+      - name: Verify Render generic MP3 path
         shell: bash
+        env:
+          API: https://rvl-api.onrender.com
+          URL: https://www.youtube.com/watch?v=9_0Dk2B2zmA
         run: |
           set -euo pipefail
-          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$SHORT\",\"quality\":\"best\"}" "$API/api/jobs" | tee /tmp/job.json
+          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$URL\",\"quality\":\"audio\"}" "$API/api/jobs" | tee /tmp/job.json
           JOB=$(python -c 'import json; print(json.load(open("/tmp/job.json"))["job_id"])')
           READY=0
-          for i in $(seq 1 120); do
+          for i in $(seq 1 160); do
             BODY=$(curl -fsS -L --max-time 20 "$API/api/jobs/$JOB")
-            echo "$BODY"
             STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
-            if [ "$STATE" = ready ]; then READY=1; break; fi
-            [ "$STATE" = error ] && exit 1
+            echo "$STATE"
+            if [ "$STATE" = ready ]; then READY=1; echo "$BODY"; break; fi
+            [ "$STATE" = error ] && { echo "$BODY"; exit 1; }
             sleep 1
           done
           [ "$READY" = 1 ]
-          curl -fsS -L --max-time 60 -r 0-65535 -o /tmp/short.bin "$API/api/jobs/$JOB/file"
-          test $(wc -c < /tmp/short.bin) -gt 10000
