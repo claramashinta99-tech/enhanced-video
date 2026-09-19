@@ -5,26 +5,18 @@ on:
 jobs:
   diag:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     env:
       API: https://rvl-api.onrender.com
-      URL: https://www.youtube.com/watch?v=9_0Dk2B2zmA
     steps:
-      - name: MP3 conversion job only
+      - name: Fresh audio source
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$URL\",\"quality\":\"audio\"}" "$API/api/mp3/jobs" | tee /tmp/mp3job.json
-          JOB=$(python -c 'import json; print(json.load(open("/tmp/mp3job.json"))["job_id"])')
-          READY=0
-          for i in $(seq 1 150); do
-            BODY=$(curl -fsS -L --max-time 20 "$API/api/jobs/$JOB")
-            echo "$BODY"
-            STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
-            if [ "$STATE" = ready ]; then READY=1; break; fi
-            [ "$STATE" = error ] && exit 1
-            sleep 1
-          done
-          [ "$READY" = 1 ]
-          curl -fsS -L --max-time 60 -r 0-65535 -o /tmp/mp3.bin "$API/api/jobs/$JOB/file"
-          test $(wc -c < /tmp/mp3.bin) -gt 10000
+          U='https://www.youtube.com/watch?v=9_0Dk2B2zmA&rvl_audio=fresh20260919'
+          echo '=== MP3 INFO ==='
+          curl -fsS -L --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$U\"}" "$API/api/mp3/info"
+          echo
+          echo '=== AUDIO PREPARE ==='
+          curl -fsS -L --max-time 90 -H 'Content-Type: application/json' -d "{\"url\":\"$U\"}" "$API/api/audio/prepare"
+          echo
