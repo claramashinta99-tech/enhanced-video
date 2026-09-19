@@ -69,30 +69,29 @@ async function runReference(input,output,brand='mp42'){
  await execChecked(['-i',input,'-map','0:v:0','-map','0:a?','-c','copy','-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-avoid_negative_ts','make_zero','-brand',brand,output]);
 }
 async function runMaxQualityFps(input,output){
- // Max Quality + FPS: make a real TikTok-friendly H.264 120fps master.
- // The previous stream-copy/timing-only version still delivered the source's
- // original 60fps/codec characteristics to TikTok, which is exactly what this
- // mode is meant to avoid.
- //
- // Only this mode is re-encoded. Reference remains a pure remux.
+ // Max Quality + FPS: create a TikTok-friendly 1080p H.264 master
+ // without the browser-heavy 120fps/CRF10 encode that can stall WASM.
+ // Keep this fix isolated to this mode; Reference is unchanged.
  await execChecked([
   '-i',input,
   '-map','0:v:0',
   '-map','0:a:0?',
-  '-vf','fps=120',
+  '-vf','fps=60',
   '-c:v','libx264',
   '-preset','ultrafast',
-  '-crf','10',
+  '-crf','18',
+  '-maxrate','18M',
+  '-bufsize','36M',
   '-profile:v','high',
-  '-level:v','5.1',
+  '-level:v','4.2',
   '-pix_fmt','yuv420p',
-  '-r','120',
+  '-r','60',
   '-g','120',
-  '-keyint_min','120',
+  '-keyint_min','60',
   '-sc_threshold','0',
   '-bf','2',
   '-c:a','aac',
-  '-b:a','256k',
+  '-b:a','192k',
   '-ar','48000',
   '-ac','2',
   '-map_metadata','-1',
