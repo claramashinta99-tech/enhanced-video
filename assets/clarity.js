@@ -65,39 +65,36 @@ async function execChecked(args){
  if(typeof code==='number'&&code!==0)throw new Error(`FFmpeg exited with code ${code}`);
 }
 async function deleteLocal(name){try{await ffmpeg.deleteFile(name)}catch{}}
-async function runReference(input,output){
- await execChecked([
-  '-i',input,
-  '-map','0:v:0',
-  '-map','0:a?',
-  '-c','copy',
-  '-map_metadata','-1',
-  '-movflags','+faststart',
-  '-metadata','comment=Prepared with Clarity by Reyval',
-  output
- ]);
-}
+
 async function runMaxQualityFps(input,output){
- // "120 FPS" is a ceiling, not an instruction to create 120 FPS.
- // Preserve the source frame rate (60 stays 60, 120 stays 120) and only
- // remux the streams. This avoids the quality loss from forced interpolation
- // or re-encoding while keeping the MP4 delivery structure clean.
- await execChecked([
-  '-i',input,
-  '-map','0:v:0',
-  '-map','0:a?',
-  '-c','copy',
-  '-fps_mode','passthrough',
-  '-video_track_timescale','90000',
-  '-map_metadata','-1',
-  '-map_chapters','-1',
-  '-movflags','+faststart',
-  '-brand','isom',
-  '-tag:v','avc1',
-  '-metadata','comment=Max Quality + FPS Method',
-  output
- ]);
- return true;
+ // 120 FPS is the maximum supported frame rate, not a forced target.
+ // The source video stream is copied untouched; the AAC patch mirrors the
+ // CompressBase-style container/track structure without generating frames.
+
+ const mainAac='rvl-main.aac',patchAac='rvl-fps-patch.aac';
+ let patchApplied=false;
+ try{
+  const extractCode=await ffmpeg.exec(['-i',input,'-map','0:a:0','-c:a','copy','-f','adts',mainAac]);
+  if(typeof extractCode==='number'&&extractCode!==0)throw new Error('Primary AAC track unavailable');
+  const raw=await ffmpeg.readFile(mainAac);
+  const mainAudio=raw instanceof Uint8Array?raw:new Uint8Array(raw);
+  const info=parseAdts(mainAudio);
+  const patch=buildFpsPatch(mainAudio,info);
+  await ffmpeg.writeFile(patchAac,patch);
+  const n=info.frameCount,end=n*1024;
+  const videoSetts="setts=pts='PTS-STARTDTS':dts='DTS-STARTDTS'";
+  const mainAudioSetts="setts=pts='PTS-STARTPTS':dts='DTS-STARTPTS'";
+  const patchSetts=`setts=pts='if(lt(N,${n}),N*1024,${end}+(N-${n}))':dts='if(lt(N,${n}),N*1024,${end}+(N-${n}))':duration='if(lt(N,${n}),1024,1)':time_base=1/${info.sampleRate}`;
+  await execChecked(['-i',input,'-f','aac','-i',patchAac,'-map','0:v:0','-map','0:a:0?','-map','1:a:0','-c','copy','-bsf:v',videoSetts,'-bsf:a:0',mainAudioSetts,'-bsf:a:1',patchSetts,'-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-brand','isom','-metadata','comment=Patched by RVL TikTok Method',output]);
+  patchApplied=true;
+ }catch(err){
+  console.warn('Max Quality + FPS patch fallback:',err);
+  await deleteLocal(output);
+  await runReference(input,output,'isom');
+ }finally{
+  await deleteLocal(mainAac);await deleteLocal(patchAac);
+ }
+ return patchApplied;
 }
 function outputName(){const base=file.name.replace(/\.[^.]+$/,'');return `${base}-${mode}.mp4`}
 $('#process').addEventListener('click',async()=>{if(!file||busy)return;resetResult();const c=t();busy=true;$('#process').disabled=true;$('#progress-wrap').classList.add('show');setProgress(3,c.loading);let input=null;const output='output.mp4';try{await ensureFFmpeg();setProgress(8,mode==='maxquality'?c.processingMax:c.processingRef);const ext=file.name.split('.').pop().toLowerCase();input=`input.${ext}`;await ffmpeg.writeFile(input,new Uint8Array(await file.arrayBuffer()));let patchApplied=false;if(mode==='maxquality')patchApplied=await runMaxQualityFps(input,output);else await runReference(input,output);const data=await ffmpeg.readFile(output);const bytes=data instanceof Uint8Array?data:new Uint8Array(data);const blob=new Blob([bytes],{type:'video/mp4'});setProgress(100,mode==='maxquality'?c.processingMax:c.processingRef);resultURL=URL.createObjectURL(blob);const dl=$('#download');dl.href=resultURL;dl.download=outputName();dl.textContent=c.download;$('#result-title').textContent=c.ready;$('#result-meta').textContent=`${mode==='maxquality'?(patchApplied?c.patched:c.maxFallback):c.remuxed} · ${formatBytes(blob.size)}`;$('#result').classList.add('show');$('#show-result').disabled=false}catch(err){console.error(err);toast(c.failed);$('#progress-text').textContent=c.failed}finally{if(input)await deleteLocal(input);await deleteLocal(output);busy=false;$('#process').disabled=!file}});
