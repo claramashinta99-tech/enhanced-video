@@ -5,30 +5,25 @@ on:
 jobs:
   diag:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     env:
       API: https://rvl-api.onrender.com
-      NORMAL: https://www.youtube.com/watch?v=9_0Dk2B2zmA
-      FOURK: https://www.youtube.com/watch?v=b8wsjx7dFwM
+      URL: https://www.youtube.com/watch?v=9_0Dk2B2zmA
     steps:
-      - name: Health and info
+      - name: MP3 info and prepare
         shell: bash
         run: |
           set -euo pipefail
-          echo '=== HEALTH ==='
-          curl -fsS -L --max-time 30 "$API/health"
+          curl -fsS -L --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$URL\"}" "$API/api/mp3/info"
           echo
-          for U in "$NORMAL" "$FOURK"; do
-            echo "=== INFO $U ==="
-            curl -fsS -L --max-time 120 -H 'Content-Type: application/json' -d "{\"url\":\"$U\"}" "$API/api/info"
-            echo
-          done
-      - name: Test normal video job
+          curl -fsS -L --max-time 90 -H 'Content-Type: application/json' -d "{\"url\":\"$URL\"}" "$API/api/audio/prepare"
+          echo
+      - name: MP3 conversion job
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$NORMAL\",\"quality\":\"720\"}" "$API/api/jobs" | tee /tmp/job.json
-          JOB=$(python -c 'import json; print(json.load(open("/tmp/job.json"))["job_id"])')
+          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$URL\",\"quality\":\"audio\"}" "$API/api/mp3/jobs" | tee /tmp/mp3job.json
+          JOB=$(python -c 'import json; print(json.load(open("/tmp/mp3job.json"))["job_id"])')
           READY=0
           for i in $(seq 1 120); do
             BODY=$(curl -fsS -L --max-time 20 "$API/api/jobs/$JOB")
@@ -39,23 +34,5 @@ jobs:
             sleep 1
           done
           [ "$READY" = 1 ]
-          curl -fsS -L --max-time 60 -r 0-131071 -o /tmp/normal.bin "$API/api/jobs/$JOB/file"
-          test $(wc -c < /tmp/normal.bin) -gt 10000
-      - name: Test 4K best job
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$FOURK\",\"quality\":\"best\"}" "$API/api/jobs" | tee /tmp/job4k.json
-          JOB=$(python -c 'import json; print(json.load(open("/tmp/job4k.json"))["job_id"])')
-          READY=0
-          for i in $(seq 1 240); do
-            BODY=$(curl -fsS -L --max-time 20 "$API/api/jobs/$JOB")
-            echo "$BODY"
-            STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
-            if [ "$STATE" = ready ]; then READY=1; break; fi
-            [ "$STATE" = error ] && exit 1
-            sleep 1
-          done
-          [ "$READY" = 1 ]
-          curl -fsS -L --max-time 90 -r 0-131071 -o /tmp/fourk.bin "$API/api/jobs/$JOB/file"
-          test $(wc -c < /tmp/fourk.bin) -gt 10000
+          curl -fsS -L --max-time 60 -r 0-65535 -o /tmp/mp3.bin "$API/api/jobs/$JOB/file"
+          test $(wc -c < /tmp/mp3.bin) -gt 10000
