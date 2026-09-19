@@ -5,11 +5,44 @@ on:
 jobs:
   diag:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 12
+    env:
+      API: https://rvl-api.onrender.com
+      FOURK: https://www.youtube.com/watch?v=b8wsjx7dFwM
+      NORMAL: https://www.youtube.com/watch?v=9_0Dk2B2zmA
     steps:
-      - name: Test Shorts URL shape on authenticated Render
+      - name: Render 4K best job
+        shell: bash
         run: |
-          set +e
-          API=https://rvl-api.onrender.com
-          U=https://www.youtube.com/shorts/9_0Dk2B2zmA
-          curl -sS -i --max-time 120 -H 'Content-Type: application/json' -d "{\"url\":\"$U\"}" "$API/api/info"
+          set -euo pipefail
+          curl -fsS -L --max-time 60 -H 'Content-Type: application/json'             -d "{\"url\":\"$FOURK\",\"quality\":\"best\"}" "$API/api/jobs" | tee /tmp/job.json
+          JOB=$(python -c 'import json; print(json.load(open("/tmp/job.json"))["job_id"])')
+          for i in $(seq 1 240); do
+            BODY=$(curl -fsS -L --max-time 30 "$API/api/jobs/$JOB")
+            echo "$BODY"
+            STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
+            if [ "$STATE" = ready ]; then
+              curl -fsS -L --max-time 90 -r 0-1048575 -o /tmp/head.bin "$API/api/jobs/$JOB/file"
+              echo "HEAD_BYTES=$(wc -c < /tmp/head.bin)"
+              exit 0
+            fi
+            [ "$STATE" = error ] && exit 2
+            sleep 2
+          done
+          exit 3
+      - name: Render MP3 job
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -L --max-time 60 -H 'Content-Type: application/json'             -d "{\"url\":\"$NORMAL\"}" "$API/api/mp3/jobs" | tee /tmp/mp3job.json
+          JOB=$(python -c 'import json; print(json.load(open("/tmp/mp3job.json"))["job_id"])')
+          for i in $(seq 1 90); do
+            BODY=$(curl -fsS -L --max-time 30 "$API/api/jobs/$JOB")
+            echo "$BODY"
+            STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
+            [ "$STATE" = ready ] && exit 0
+            [ "$STATE" = error ] && exit 2
+            sleep 2
+          done
+          exit 3
