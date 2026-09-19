@@ -8,13 +8,25 @@ jobs:
     timeout-minutes: 8
     env:
       API: https://rvl-api.onrender.com
-      URL: https://www.youtube.com/watch?v=9_0Dk2B2zmA
+      SHORT: https://www.youtube.com/watch?v=sbZCJrZFJpM
     steps:
-      - name: Generic audio job
+      - name: Shorts info
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$URL\",\"quality\":\"audio\"}" "$API/api/jobs" | tee /tmp/job.json
+          curl -fsS -L --max-time 90 -H 'Content-Type: application/json' -d "{\"url\":\"$SHORT\"}" "$API/api/info" | tee /tmp/info.json
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/info.json'))
+          assert x.get('platform')=='youtube'
+          assert x.get('id')=='sbZCJrZFJpM'
+          print(x.get('title'), x.get('max_height'))
+          PY
+      - name: Shorts best job
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$SHORT\",\"quality\":\"best\"}" "$API/api/jobs" | tee /tmp/job.json
           JOB=$(python -c 'import json; print(json.load(open("/tmp/job.json"))["job_id"])')
           READY=0
           for i in $(seq 1 120); do
@@ -26,5 +38,5 @@ jobs:
             sleep 1
           done
           [ "$READY" = 1 ]
-          curl -fsS -L --max-time 60 -r 0-65535 -o /tmp/audio.bin "$API/api/jobs/$JOB/file"
-          test $(wc -c < /tmp/audio.bin) -gt 10000
+          curl -fsS -L --max-time 60 -r 0-65535 -o /tmp/short.bin "$API/api/jobs/$JOB/file"
+          test $(wc -c < /tmp/short.bin) -gt 10000
