@@ -69,36 +69,15 @@ async function runReference(input,output,brand='mp42'){
  await execChecked(['-i',input,'-map','0:v:0','-map','0:a?','-c','copy','-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-avoid_negative_ts','make_zero','-brand',brand,output]);
 }
 async function runMaxQualityFps(input,output){
- // Max Quality + FPS: create a TikTok-friendly 1080p H.264 master
- // without the browser-heavy 120fps/CRF10 encode that can stall WASM.
- // Keep this fix isolated to this mode; Reference is unchanged.
+ // Keep the source bitstreams untouched. The re-encode path was causing
+ // visible quality loss after TikTok processing. This mirrors the previously
+ // stable Clarity HQ behavior: remux only, fast-start, no FPS/codec rewrite.
  await execChecked([
   '-i',input,
   '-map','0:v:0',
   '-map','0:a:0?',
-  '-vf','fps=60',
-  '-c:v','libx264',
-  '-preset','ultrafast',
-  '-crf','18',
-  '-maxrate','18M',
-  '-bufsize','36M',
-  '-profile:v','high',
-  '-level:v','4.2',
-  '-pix_fmt','yuv420p',
-  '-r','60',
-  '-g','120',
-  '-keyint_min','60',
-  '-sc_threshold','0',
-  '-bf','2',
-  '-c:a','aac',
-  '-b:a','192k',
-  '-ar','48000',
-  '-ac','2',
-  '-map_metadata','-1',
-  '-map_chapters','-1',
+  '-c','copy',
   '-movflags','+faststart',
-  '-brand','isom',
-  '-metadata','comment=Max Quality + FPS Method',
   output
  ]);
  return true;
