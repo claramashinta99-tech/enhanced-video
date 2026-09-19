@@ -1,0 +1,43 @@
+name: YouTube Live Diagnostic Temp
+on:
+  push:
+    branches: [diag-youtube-live-20260919]
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      API: https://enhanced-video-production.up.railway.app
+      VIDEO: https://www.youtube.com/watch?v=9_0Dk2B2zmA
+      SHORTS: https://www.youtube.com/shorts/toAU_JyPI9M
+    steps:
+      - name: Health
+        run: |
+          set +e
+          echo '=== HEALTH ==='
+          curl -sS -i --max-time 30 "$API/health"
+          echo
+          echo '=== ENGINE ==='
+          curl -sS -i --max-time 30 "$API/api/youtube/engine"
+          echo
+          echo '=== NETTEST ==='
+          curl -sS -i --max-time 60 "$API/api/youtube/nettest"
+      - name: Strategy selftests
+        run: |
+          set +e
+          for s in mweb-pot-public default-public embedded-public android-vr-public default-embedded-cookie safari-cookie; do
+            echo "=== $s ==="
+            curl -sS -i --max-time 60 "$API/api/youtube/selftest/$s"
+            echo
+          done
+      - name: API info tests
+        run: |
+          set +e
+          for U in "$VIDEO" "$SHORTS"; do
+            echo "=== INFO $U ==="
+            curl -sS -i --max-time 90 -H 'Content-Type: application/json' -d "{\"url\":\"$U\"}" "$API/api/info"
+            echo
+            echo "=== MP3 INFO $U ==="
+            curl -sS -i --max-time 90 -H 'Content-Type: application/json' -d "{\"url\":\"$U\"}" "$API/api/mp3/info"
+            echo
+          done
