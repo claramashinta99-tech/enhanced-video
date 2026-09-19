@@ -25,7 +25,7 @@ jobs:
       - name: Strategy selftests
         run: |
           set +e
-          for s in mweb-pot-public default-public embedded-public android-vr-public default-embedded-cookie safari-cookie; do
+          for s in visionos-studio-skip visionos-music-skip visionos-mobile-skip visionos-nocookie-skip visionos-googleapis-skip; do
             echo "=== $s ==="
             curl -sS -i --max-time 60 "$API/api/youtube/selftest/$s"
             echo
