@@ -10,22 +10,14 @@ jobs:
       API: https://rvl-api.onrender.com
       URL: https://www.youtube.com/watch?v=9_0Dk2B2zmA
     steps:
-      - name: MP3 info and prepare
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsS -L --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$URL\"}" "$API/api/mp3/info"
-          echo
-          curl -fsS -L --max-time 90 -H 'Content-Type: application/json' -d "{\"url\":\"$URL\"}" "$API/api/audio/prepare"
-          echo
-      - name: MP3 conversion job
+      - name: MP3 conversion job only
         shell: bash
         run: |
           set -euo pipefail
           curl -fsS -L --max-time 30 -H 'Content-Type: application/json' -d "{\"url\":\"$URL\",\"quality\":\"audio\"}" "$API/api/mp3/jobs" | tee /tmp/mp3job.json
           JOB=$(python -c 'import json; print(json.load(open("/tmp/mp3job.json"))["job_id"])')
           READY=0
-          for i in $(seq 1 120); do
+          for i in $(seq 1 150); do
             BODY=$(curl -fsS -L --max-time 20 "$API/api/jobs/$JOB")
             echo "$BODY"
             STATE=$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("state"))' "$BODY")
