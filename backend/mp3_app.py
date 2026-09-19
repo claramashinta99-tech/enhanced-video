@@ -17,7 +17,7 @@ from yt_dlp.utils import DownloadError
 
 app=legacy.app
 legacy.APP_VERSION='1.12.8';app.version=legacy.APP_VERSION
-MP3_SOURCE_TTL=600;MP3_PREP_WAIT=18;AUDIO_TOKEN_TTL=180;AUDIO_STREAM_CONCURRENCY=4
+MP3_SOURCE_TTL=600;MP3_PREP_WAIT=45;AUDIO_TOKEN_TTL=180;AUDIO_STREAM_CONCURRENCY=4
 _mp3_source_lock=threading.Lock();_mp3_sources={};_audio_token_lock=threading.Lock();_audio_tokens={};_audio_stream_slots=threading.BoundedSemaphore(AUDIO_STREAM_CONCURRENCY)
 
 def youtube_id(url):
@@ -72,6 +72,18 @@ def _mp3_attempts():
 
 def _prepare_audio_source_sync(url):
  started=time.monotonic();errors=[]
+ # Reuse the shared YouTube extractor/cache first, then fall back to the dedicated audio strategies.
+ try:
+  info=legacy.extract_info_sync(url)
+  if info and info.get('entries'):info=next((x for x in info['entries'] if x),info)
+  source=_audio_source_from_info(info)
+  if source and source.get('url'):
+   cached=legacy.cache_get(url) or {}
+   strategy=cached.get('strategy') or {'name':'shared-extractor'}
+   print(f"audio source ready strategy={strategy.get('name')} ms={int((time.monotonic()-started)*1000)}",flush=True)
+   return {'source':source,'title':(info or {}).get('title') or 'YouTube audio','duration':(info or {}).get('duration') or source.get('duration'),'strategy':strategy.get('name')}
+ except Exception as exc:
+  errors.append(f"shared:{type(exc).__name__}")
  for strategy in _mp3_attempts():
   try:
    opts=legacy.base_opts(url,strategy.get('clients'),strategy.get('cookie',False));opts.update({'format':'bestaudio[ext=m4a]/bestaudio/best','skip_download':True,'socket_timeout':6,'retries':0,'fragment_retries':0,'extractor_retries':0,'cachedir':False})
