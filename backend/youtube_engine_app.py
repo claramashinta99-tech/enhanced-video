@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import os
 import re
@@ -320,7 +321,7 @@ def download_from_info(url, quality, workdir, info, strategy, job_id=None):
 
     legacy.clear_workdir(workdir)
     with YoutubeDL(legacy.dl_opts(url, quality, workdir, strategy, fmt, job_id)) as ydl:
-        ydl.process_ie_result(info.copy(), download=True)
+        ydl.process_ie_result(copy.deepcopy(info), download=True)
 
     path = _youtube_output_file(workdir, quality)
     legacy.verify_file_quality(path, quality)
