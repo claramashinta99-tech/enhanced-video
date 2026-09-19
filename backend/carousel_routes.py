@@ -181,12 +181,13 @@ def _tikwm_photo_info(url):
     raise DownloadError(f'TikTok slideshow unavailable: {last or "unknown"}')
 
 
-def _best_thumbnail(entry):
-    if entry.get('thumbnail'):
-        return entry['thumbnail']
+def _thumbnail_urls(entry):
+    urls = []
+    primary = entry.get('thumbnail')
+    if isinstance(primary, str) and primary.startswith(('http://', 'https://')):
+        urls.append(primary)
+
     thumbs = [x for x in (entry.get('thumbnails') or []) if isinstance(x, dict) and x.get('url')]
-    if not thumbs:
-        return None
 
     def area(value):
         try:
@@ -194,7 +195,16 @@ def _best_thumbnail(entry):
         except Exception:
             return 0
 
-    return max(thumbs, key=area).get('url')
+    for thumb in sorted(thumbs, key=area, reverse=True):
+        url = thumb.get('url')
+        if isinstance(url, str) and url.startswith(('http://', 'https://')) and url not in urls:
+            urls.append(url)
+    return urls
+
+
+def _best_thumbnail(entry):
+    urls = _thumbnail_urls(entry)
+    return urls[0] if urls else None
 
 
 def _instagram_item(entry, index):
@@ -231,9 +241,14 @@ def _instagram_item(entry, index):
             direct_url = chosen.get('url')
             direct_ext = chosen.get('ext') or 'mp4'
     else:
-        direct_url = entry.get('url')
-        if not direct_url and ext in {'jpg', 'jpeg', 'png', 'webp', 'avif'}:
-            direct_url = _best_thumbnail(entry)
+        image_urls = []
+        entry_url = entry.get('url')
+        if isinstance(entry_url, str) and entry_url.startswith(('http://', 'https://')):
+            image_urls.append(entry_url)
+        for image_url in _thumbnail_urls(entry):
+            if image_url not in image_urls:
+                image_urls.append(image_url)
+        direct_url = image_urls[0] if image_urls else None
         direct_ext = direct_ext if direct_ext in {'jpg', 'jpeg', 'png', 'webp', 'avif'} else 'jpg'
 
     return {
@@ -241,6 +256,7 @@ def _instagram_item(entry, index):
         'kind': kind,
         'thumbnail': _best_thumbnail(entry) or (direct_url if kind == 'image' else None),
         '_url': direct_url,
+        '_urls': image_urls if kind == 'image' else ([direct_url] if direct_url else []),
         '_ext': direct_ext or ('mp4' if kind == 'video' else 'jpg'),
         '_playlist_index': index,
     }
@@ -380,16 +396,25 @@ def _download_item(info, source_url, item, workdir, job_id=None):
     ext = re.sub(r'[^a-z0-9]+', '', ext) or ('mp4' if kind == 'video' else 'jpg')
     target = Path(workdir) / f'{index:02d}.{ext}'
 
-    direct = item.get('_url')
-    if direct:
+    direct_urls = [url for url in (item.get('_urls') or [item.get('_url')]) if url]
+    if direct_urls:
         referer = 'https://www.instagram.com/' if platform == 'instagram' else 'https://www.tiktok.com/'
-        try:
-            return _download_direct(direct, target, platform, referer, job_id)
-        except Exception:
-            if platform != 'instagram':
-                raise
+        last_direct_error = None
+        for direct in direct_urls:
+            try:
+                return _download_direct(direct, target, platform, referer, job_id)
+            except Exception as exc:
+                last_direct_error = exc
+                try:
+                    target.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        if platform != 'instagram':
+            raise last_direct_error or DownloadError('Carousel direct download failed')
 
     if platform == 'instagram':
+        if kind == 'image':
+            raise DownloadError('Instagram carousel image URL unavailable')
         return _download_instagram_with_ytdlp(source_url, index, workdir, job_id)
     raise DownloadError('TikTok carousel item unavailable')
 
