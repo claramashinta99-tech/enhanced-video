@@ -21,6 +21,7 @@ app = base.app
 legacy = base.legacy
 
 _ORIGINAL_BASE_OPTS = legacy.base_opts
+_ORIGINAL_EXTRACT_INFO_SYNC = legacy.extract_info_sync
 _ORIGINAL_DOWNLOAD_FROM_INFO = legacy.download_from_info
 _ORIGINAL_DOWNLOAD_SYNC = legacy.download_sync
 _ANSI = re.compile(r'\x1b\[[0-9;]*m')
@@ -333,7 +334,7 @@ def extract_info_sync(url):
         return cached['info']
 
     if not legacy.is_youtube(url):
-        return base.extract_info_sync(url)
+        return _ORIGINAL_EXTRACT_INFO_SYNC(url)
 
     errors = []
     for strategy in _stable_youtube_attempts():
