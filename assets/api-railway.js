@@ -1,14 +1,20 @@
 (()=>{
   if(window.__rvlRailwayBridge)return;
   window.__rvlRailwayBridge=true;
-  const FROM='https://rvl-api.onrender.com';
-  const TO='https://enhanced-video-production.up.railway.app';
-  const useRailway=()=>true;
+  const RENDER='https://rvl-api.onrender.com';
+  const RAILWAY='https://enhanced-video-production.up.railway.app';
+  const platform=()=>document.body?.dataset?.platform||'';
+  const isYouTubePage=()=>platform().startsWith('youtube');
   const rewrite=value=>{
     try{
       const s=String(value||'');
-      if(!useRailway())return s;
-      return s.startsWith(FROM)?TO+s.slice(FROM.length):s;
+      // YouTube Video / Shorts / MP3 use authenticated Render while
+      // Railway's public YouTube egress is blocked by YouTube.
+      if(isYouTubePage())return s.startsWith(RAILWAY)?RENDER+s.slice(RAILWAY.length):s;
+      // Universal chooses its backend per detected link.
+      if(platform()==='universal')return s;
+      // Everything else stays on Railway exactly as before.
+      return s.startsWith(RENDER)?RAILWAY+s.slice(RENDER.length):s;
     }catch{return value}
   };
 
