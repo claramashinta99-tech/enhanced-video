@@ -333,13 +333,14 @@ def extract_info_sync(url):
     if cached:
         return cached['info']
 
-    if not legacy.is_youtube(url):
-        return _ORIGINAL_EXTRACT_INFO_SYNC(url)
-
+    attempts = youtube_attempts() if legacy.is_youtube(url) else [
+        {'name': 'default', 'clients': None, 'cookie': False}
+    ]
     errors = []
-    for strategy in _stable_youtube_attempts():
+
+    for strategy in attempts:
         try:
-            opts = _stable_opts(url, strategy)
+            opts = base_opts(url, strategy.get('clients'), strategy.get('cookie', False))
             opts['skip_download'] = True
             with YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False, process=False)
@@ -347,25 +348,19 @@ def extract_info_sync(url):
                 if info.get('entries'):
                     info = next((item for item in info['entries'] if item), info)
                 legacy.cache_put(url, info, strategy)
-                print(
-                    f'youtube stable info ok host={urlparse(url).hostname} '
-                    f'strategy={strategy["name"]}',
-                    flush=True,
-                )
+                print(f'youtube info ok host={urlparse(url).hostname} strategy={strategy["name"]}', flush=True)
                 return info
         except Exception as exc:
             detail = _clean_error(exc)
             errors.append(f'{strategy["name"]}={detail}')
             print(
-                f'youtube stable info failed host={urlparse(url).hostname} '
+                f'youtube attempt failed host={urlparse(url).hostname} '
                 f'strategy={strategy["name"]} error={detail}',
                 flush=True,
             )
 
-    print(
-        f'media info failed host={urlparse(url).hostname} details={" | ".join(errors)}',
-        flush=True,
-    )
+    joined = ' | '.join(errors)
+    print(f'media info failed host={urlparse(url).hostname} details={joined}', flush=True)
     raise DownloadError('media info failed')
 
 
@@ -485,7 +480,7 @@ legacy.extract_info_sync = extract_info_sync
 legacy.download_from_info = download_from_info
 legacy.download_sync = download_sync
 legacy.youtube_error = youtube_error
-legacy.APP_VERSION = '1.15.10'
+legacy.APP_VERSION = '1.15.11'
 app.version = legacy.APP_VERSION
 
 
