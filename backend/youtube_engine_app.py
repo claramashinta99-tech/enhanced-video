@@ -42,18 +42,16 @@ def _clean_error(exc):
 
 
 def youtube_attempts():
-    attempts = [
+    # Exact strategy order from the v1.7.0 backend state that was confirmed
+    # working in production for YouTube on 2026-09-16.
+    return [
         {'name': 'mweb-pot-public', 'clients': ['mweb'], 'cookie': False},
-        {'name': 'default-public', 'clients': ['default'], 'cookie': False},
+        {'name': 'mweb-pot-cookie', 'clients': ['mweb'], 'cookie': True},
+        {'name': 'default-cookie', 'clients': ['default', 'mweb'], 'cookie': True},
+        {'name': 'safari-cookie', 'clients': ['default', 'web_safari'], 'cookie': True},
         {'name': 'embedded-public', 'clients': ['web_embedded'], 'cookie': False},
-        {'name': 'android-vr-public', 'clients': ['android_vr'], 'cookie': False, 'selector': 'best/18'},
+        {'name': 'android-vr', 'clients': ['android_vr'], 'cookie': False, 'selector': 'best/18'},
     ]
-    if legacy.youtube_cookie_ready():
-        attempts.extend([
-            {'name': 'default-embedded-cookie', 'clients': ['default', 'web_embedded'], 'cookie': True},
-            {'name': 'safari-cookie', 'clients': ['web_safari'], 'cookie': True},
-        ])
-    return attempts
 
 
 SELFTEST_STRATEGIES = [
@@ -68,30 +66,18 @@ SELFTEST_STRATEGIES = [
 def base_opts(url=None, clients=None, use_cookie=True):
     clients = clients or ['mweb']
     opts = _ORIGINAL_BASE_OPTS(url, clients, use_cookie)
-    opts['socket_timeout'] = 8
-    opts['retries'] = 0
-    opts['fragment_retries'] = 1
-    opts['extractor_retries'] = 0
+    # Match the production-proven v1.7.0 retry profile.
+    opts['socket_timeout'] = 30
+    opts['retries'] = 3
+    opts['fragment_retries'] = 3
+    opts.pop('extractor_retries', None)
     return opts
 
 
 
 
 def _stable_youtube_attempts():
-    if legacy.youtube_cookie_ready():
-        return [
-            {'name': 'mweb-cookie', 'clients': ['mweb'], 'cookie': True},
-            {'name': 'default-cookie', 'clients': ['default', 'mweb'], 'cookie': True},
-            {'name': 'safari-cookie', 'clients': ['default', 'web_safari'], 'cookie': True},
-            {'name': 'mweb-public', 'clients': ['mweb'], 'cookie': False},
-            {'name': 'embedded-public', 'clients': ['web_embedded'], 'cookie': False},
-            {'name': 'android-vr', 'clients': ['android_vr'], 'cookie': False, 'selector': 'best/18'},
-        ]
-    return [
-        {'name': 'mweb-public', 'clients': ['mweb'], 'cookie': False},
-        {'name': 'embedded-public', 'clients': ['web_embedded'], 'cookie': False},
-        {'name': 'android-vr', 'clients': ['android_vr'], 'cookie': False, 'selector': 'best/18'},
-    ]
+    return [dict(item) for item in youtube_attempts()]
 
 
 def _stable_opts(url, strategy):
@@ -100,9 +86,10 @@ def _stable_opts(url, strategy):
         strategy.get('clients'),
         strategy.get('cookie', False),
     )
-    opts['socket_timeout'] = 25
-    opts['retries'] = 2
-    opts['fragment_retries'] = 2
+    opts['socket_timeout'] = 30
+    opts['retries'] = 3
+    opts['fragment_retries'] = 3
+    opts.pop('extractor_retries', None)
     return opts
 
 
@@ -480,7 +467,7 @@ legacy.extract_info_sync = extract_info_sync
 legacy.download_from_info = download_from_info
 legacy.download_sync = download_sync
 legacy.youtube_error = youtube_error
-legacy.APP_VERSION = '1.15.11'
+legacy.APP_VERSION = '1.15.12'
 app.version = legacy.APP_VERSION
 
 
