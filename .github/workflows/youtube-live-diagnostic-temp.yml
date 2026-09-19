@@ -5,18 +5,38 @@ on:
 jobs:
   diag:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    env:
-      API: https://rvl-api.onrender.com
+    timeout-minutes: 8
     steps:
-      - name: Fresh audio source
+      - name: Wait for GitHub Pages failover assets
         shell: bash
         run: |
           set -euo pipefail
-          U='https://www.youtube.com/watch?v=9_0Dk2B2zmA&rvl_audio=fresh20260919'
-          echo '=== MP3 INFO ==='
-          curl -fsS -L --max-time 60 -H 'Content-Type: application/json' -d "{\"url\":\"$U\"}" "$API/api/mp3/info"
-          echo
-          echo '=== AUDIO PREPARE ==='
-          curl -fsS -L --max-time 90 -H 'Content-Type: application/json' -d "{\"url\":\"$U\"}" "$API/api/audio/prepare"
-          echo
+          OK=0
+          for i in $(seq 1 60); do
+            BRIDGE=$(curl -fsS -L --max-time 30 'https://reyval.web.id/assets/api-railway.js?v=4' || true)
+            UNI=$(curl -fsS -L --max-time 30 'https://reyval.web.id/universal-downloader/' || true)
+            if echo "$BRIDGE" | grep -q "isYouTubePage" && echo "$UNI" | grep -q "universal-downloader.js?v=3"; then
+              echo "LIVE_ASSETS_OK"
+              OK=1
+              break
+            fi
+            sleep 5
+          done
+          [ "$OK" = 1 ]
+      - name: Verify Render CORS and YouTube info
+        shell: bash
+        run: |
+          set -euo pipefail
+          API='https://rvl-api.onrender.com'
+          echo '=== CORS ==='
+          curl -sS -i -X OPTIONS --max-time 30             -H 'Origin: https://reyval.web.id'             -H 'Access-Control-Request-Method: POST'             -H 'Access-Control-Request-Headers: content-type'             "$API/api/info" | tee /tmp/cors.txt
+          grep -qi 'access-control-allow-origin: https://reyval.web.id' /tmp/cors.txt
+          echo '=== INFO ==='
+          curl -fsS -L --max-time 120             -H 'Origin: https://reyval.web.id'             -H 'Content-Type: application/json'             -d '{"url":"https://www.youtube.com/watch?v=9_0Dk2B2zmA"}'             "$API/api/info" | tee /tmp/info.json
+          python - <<'PY'
+          import json
+          x=json.load(open('/tmp/info.json'))
+          assert x.get('platform')=='youtube', x
+          assert x.get('id')=='9_0Dk2B2zmA', x
+          print({'title':x.get('title'),'max_height':x.get('max_height')})
+          PY
