@@ -21,8 +21,6 @@ app = base.app
 legacy = base.legacy
 
 _ORIGINAL_BASE_OPTS = legacy.base_opts
-_ORIGINAL_EXTRACT_INFO_SYNC = legacy.extract_info_sync
-_ORIGINAL_DOWNLOAD_FROM_INFO = legacy.download_from_info
 _ORIGINAL_DOWNLOAD_SYNC = legacy.download_sync
 _ANSI = re.compile(r'\x1b\[[0-9;]*m')
 _SELFTEST_URL = 'https://www.youtube.com/watch?v=Xh7I5J8eDQY'
@@ -42,16 +40,18 @@ def _clean_error(exc):
 
 
 def youtube_attempts():
-    # Exact strategy order from the v1.7.0 backend state that was confirmed
-    # working in production for YouTube on 2026-09-16.
-    return [
+    attempts = [
         {'name': 'mweb-pot-public', 'clients': ['mweb'], 'cookie': False},
-        {'name': 'mweb-pot-cookie', 'clients': ['mweb'], 'cookie': True},
-        {'name': 'default-cookie', 'clients': ['default', 'mweb'], 'cookie': True},
-        {'name': 'safari-cookie', 'clients': ['default', 'web_safari'], 'cookie': True},
+        {'name': 'default-public', 'clients': ['default'], 'cookie': False},
         {'name': 'embedded-public', 'clients': ['web_embedded'], 'cookie': False},
-        {'name': 'android-vr', 'clients': ['android_vr'], 'cookie': False, 'selector': 'best/18'},
+        {'name': 'android-vr-public', 'clients': ['android_vr'], 'cookie': False, 'selector': 'best/18'},
     ]
+    if legacy.youtube_cookie_ready():
+        attempts.extend([
+            {'name': 'default-embedded-cookie', 'clients': ['default', 'web_embedded'], 'cookie': True},
+            {'name': 'safari-cookie', 'clients': ['web_safari'], 'cookie': True},
+        ])
+    return attempts
 
 
 SELFTEST_STRATEGIES = [
@@ -66,253 +66,11 @@ SELFTEST_STRATEGIES = [
 def base_opts(url=None, clients=None, use_cookie=True):
     clients = clients or ['mweb']
     opts = _ORIGINAL_BASE_OPTS(url, clients, use_cookie)
-    # Match the production-proven v1.7.0 retry profile.
-    opts['socket_timeout'] = 30
-    opts['retries'] = 3
-    opts['fragment_retries'] = 3
-    opts.pop('extractor_retries', None)
+    opts['socket_timeout'] = 8
+    opts['retries'] = 0
+    opts['fragment_retries'] = 1
+    opts['extractor_retries'] = 0
     return opts
-
-
-
-
-def _stable_youtube_attempts():
-    return [dict(item) for item in youtube_attempts()]
-
-
-def _stable_opts(url, strategy):
-    opts = _ORIGINAL_BASE_OPTS(
-        url,
-        strategy.get('clients'),
-        strategy.get('cookie', False),
-    )
-    opts['socket_timeout'] = 30
-    opts['retries'] = 3
-    opts['fragment_retries'] = 3
-    opts.pop('extractor_retries', None)
-    return opts
-
-
-def _stable_dl_opts(url, quality, workdir, strategy, job_id=None):
-    fmt, audio = legacy.selector(quality)
-    if strategy.get('selector') and quality == 'best':
-        fmt = strategy['selector']
-
-    opts = _stable_opts(url, strategy)
-    opts.update({
-        'format': fmt,
-        'outtmpl': str(Path(workdir) / '%(title).80B [%(id)s].%(ext)s'),
-        'merge_output_format': 'mp4',
-        'windowsfilenames': True,
-    })
-    if quality != 'audio':
-        opts['max_filesize'] = _YOUTUBE_VIDEO_MAX_FILESIZE
-    if job_id:
-        hooks, posts = legacy.make_progress_hooks(job_id, quality)
-        opts['progress_hooks'] = hooks
-        opts['postprocessor_hooks'] = posts
-    if audio:
-        opts['postprocessors'] = [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }]
-    return opts
-
-
-
-def _probe_stream_types(path):
-    try:
-        raw = subprocess.check_output(
-            [
-                'ffprobe', '-v', 'error',
-                '-show_entries', 'stream=codec_type',
-                '-of', 'csv=p=0',
-                str(path),
-            ],
-            text=True,
-            timeout=15,
-        )
-        return {line.strip().lower() for line in raw.splitlines() if line.strip()}
-    except Exception:
-        return set()
-
-
-def _manual_merge_youtube(workdir):
-    files = [
-        path for path in Path(workdir).iterdir()
-        if path.is_file()
-        and path.stat().st_size > 1024
-        and not path.name.endswith(('.part', '.ytdl', '.temp'))
-    ]
-    videos = []
-    audios = []
-    for path in files:
-        stream_types = _probe_stream_types(path)
-        if 'video' in stream_types and 'audio' not in stream_types:
-            width, height = legacy.probe_dimensions(path)
-            videos.append(((height, width, path.stat().st_size), path))
-        elif 'audio' in stream_types and 'video' not in stream_types:
-            audios.append((path.stat().st_size, path))
-
-    if not videos or not audios:
-        raise RuntimeError('YouTube separate video/audio streams unavailable')
-
-    video = max(videos, key=lambda item: item[0])[1]
-    audio = max(audios, key=lambda item: item[0])[1]
-    stem = re.sub(r'\.f\d+$', '', video.stem, flags=re.I)
-    target = Path(workdir) / f'{stem}.mp4'
-    if target.exists():
-        target.unlink()
-
-    copy_cmd = [
-        'ffmpeg', '-y', '-v', 'error',
-        '-i', str(video), '-i', str(audio),
-        '-map', '0:v:0', '-map', '1:a:0',
-        '-c', 'copy', '-movflags', '+faststart',
-        str(target),
-    ]
-    copy_run = subprocess.run(copy_cmd, capture_output=True, text=True, timeout=180)
-    if copy_run.returncode != 0:
-        if target.exists():
-            target.unlink()
-        aac_cmd = [
-            'ffmpeg', '-y', '-v', 'error',
-            '-i', str(video), '-i', str(audio),
-            '-map', '0:v:0', '-map', '1:a:0',
-            '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
-            '-movflags', '+faststart',
-            str(target),
-        ]
-        aac_run = subprocess.run(aac_cmd, capture_output=True, text=True, timeout=240)
-        if aac_run.returncode != 0:
-            raise RuntimeError('YouTube manual merge failed')
-
-    if not target.is_file() or target.stat().st_size < 1024:
-        raise RuntimeError('YouTube merged output missing')
-    stream_types = _probe_stream_types(target)
-    if 'video' not in stream_types or 'audio' not in stream_types:
-        raise RuntimeError('YouTube merged output invalid')
-    return target
-
-
-def _youtube_output_file(workdir, quality):
-    files = [
-        path for path in Path(workdir).iterdir()
-        if path.is_file()
-        and path.stat().st_size > 1024
-        and not path.name.endswith(('.part', '.ytdl', '.temp'))
-    ]
-    if not files:
-        raise RuntimeError('YouTube output file unavailable')
-
-    if quality == 'audio':
-        return legacy.find_output(workdir)
-
-    candidates = []
-    for path in files:
-        stream_types = _probe_stream_types(path)
-        if 'video' not in stream_types:
-            continue
-        has_audio = 'audio' in stream_types
-        format_fragment = bool(re.search(r'\.f\d+\.[^.]+$', path.name, re.I))
-        candidates.append((
-            (
-                1 if has_audio else 0,
-                1 if not format_fragment else 0,
-                path.stat().st_size,
-                path.stat().st_mtime,
-            ),
-            path,
-            has_audio,
-        ))
-
-    merged = [item for item in candidates if item[2]]
-    if merged:
-        merged.sort(key=lambda item: item[0], reverse=True)
-        return merged[0][1]
-    return _manual_merge_youtube(workdir)
-
-
-def download_from_info(url, quality, workdir, info, strategy, job_id=None):
-    if not legacy.is_youtube(url):
-        return _ORIGINAL_DOWNLOAD_FROM_INFO(url, quality, workdir, info, strategy, job_id)
-
-    fmt = legacy.exact_selector(info, quality)
-    if quality in legacy.EXACT_QUALITIES and not fmt:
-        raise RuntimeError(f'exact {quality}p format not present')
-    if quality == 'audio':
-        fmt = legacy.best_audio_selector(info)
-
-    legacy.clear_workdir(workdir)
-    opts = legacy.dl_opts(url, quality, workdir, strategy, fmt, job_id)
-    if quality != 'audio':
-        opts['max_filesize'] = _YOUTUBE_VIDEO_MAX_FILESIZE
-    with YoutubeDL(opts) as ydl:
-        ydl.process_ie_result(copy.deepcopy(info), download=True)
-
-    path = _youtube_output_file(workdir, quality)
-    legacy.verify_file_quality(path, quality)
-    return legacy.add_quality_suffix(path, quality)
-
-
-
-def download_sync(url, quality, workdir, job_id=None):
-    if not legacy.is_youtube(url):
-        return _ORIGINAL_DOWNLOAD_SYNC(url, quality, workdir, job_id)
-
-    cached = legacy.cache_get(url)
-    attempts = _stable_youtube_attempts()
-    if cached:
-        preferred = cached['strategy'].get('name')
-        attempts.sort(key=lambda item: 0 if item.get('name') == preferred else 1)
-
-    errors = []
-    if job_id:
-        legacy.job_update(job_id, state='working', progress=8, stage='Menyiapkan')
-
-    for strategy in attempts:
-        try:
-            if job_id:
-                legacy.job_update(job_id, state='working', progress=10, stage='Membaca sumber')
-            legacy.clear_workdir(workdir)
-            opts = _stable_dl_opts(url, quality, workdir, strategy, job_id)
-            with YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-            if info and info.get('entries'):
-                info = next((item for item in info['entries'] if item), info)
-            path = _youtube_output_file(workdir, quality)
-            legacy.verify_file_quality(path, quality)
-            if info:
-                legacy.cache_put(url, info, strategy)
-            return legacy.add_quality_suffix(path, quality)
-        except Exception as exc:
-            errors.append(f'{strategy["name"]}:{type(exc).__name__}')
-            print(
-                f'youtube stable download failed host={urlparse(url).hostname} '
-                f'quality={quality} strategy={strategy["name"]} '
-                f'error={_clean_error(exc)}',
-                flush=True,
-            )
-
-    print(
-        f'youtube stable download exhausted host={urlparse(url).hostname} '
-        f'quality={quality} attempts={",".join(errors)}',
-        flush=True,
-    )
-    raise DownloadError('download failed')
-
-
-
-def youtube_error(exc):
-    message = str(exc).lower()
-    if 'sign in' in message or 'not a bot' in message or 'login' in message:
-        return 'YouTube menolak sesi server. Coba lagi atau perbarui cookie YouTube jika diperlukan.'
-    if 'filesize' in message or 'too large' in message or 'maximum file size' in message:
-        return 'File video YouTube terlalu besar untuk diproses server.'
-    if 'merge' in message or 'video output' in message or 'stream' in message:
-        return 'YouTube gagal menyatukan stream video dan audio. Coba lagi.'
-    return 'YouTube gagal menyiapkan file video. Coba lagi.'
 
 
 def extract_info_sync(url):
@@ -349,6 +107,160 @@ def extract_info_sync(url):
     joined = ' | '.join(errors)
     print(f'media info failed host={urlparse(url).hostname} details={joined}', flush=True)
     raise DownloadError('media info failed')
+
+
+def _probe_stream_types(path):
+    try:
+        raw = subprocess.check_output(
+            [
+                'ffprobe', '-v', 'error',
+                '-show_entries', 'stream=codec_type',
+                '-of', 'csv=p=0',
+                str(path),
+            ],
+            text=True,
+            timeout=15,
+        )
+        return {line.strip().lower() for line in raw.splitlines() if line.strip()}
+    except Exception:
+        return set()
+
+
+def _complete_youtube_output(workdir):
+    files = [
+        p for p in Path(workdir).iterdir()
+        if p.is_file()
+        and p.stat().st_size > 1024
+        and not p.name.endswith(('.part', '.ytdl', '.temp'))
+    ]
+    candidates = []
+    for path in files:
+        types = _probe_stream_types(path)
+        if 'video' in types and 'audio' in types:
+            format_fragment = bool(re.search(r'\.f\d+\.[^.]+$', path.name, re.I))
+            candidates.append((
+                1 if not format_fragment else 0,
+                path.stat().st_size,
+                path.stat().st_mtime,
+                path,
+            ))
+    if not candidates:
+        return None
+    candidates.sort(reverse=True, key=lambda item: item[:3])
+    return candidates[0][3]
+
+
+def _manual_merge_youtube(workdir):
+    files = [
+        p for p in Path(workdir).iterdir()
+        if p.is_file()
+        and p.stat().st_size > 1024
+        and not p.name.endswith(('.part', '.ytdl', '.temp'))
+    ]
+    videos = []
+    audios = []
+    for path in files:
+        types = _probe_stream_types(path)
+        if 'video' in types and 'audio' not in types:
+            w, h = legacy.probe_dimensions(path)
+            videos.append(((h, w, path.stat().st_size), path))
+        elif 'audio' in types and 'video' not in types:
+            audios.append((path.stat().st_size, path))
+    if not videos or not audios:
+        raise RuntimeError('YouTube separate streams unavailable')
+
+    video = max(videos, key=lambda item: item[0])[1]
+    audio = max(audios, key=lambda item: item[0])[1]
+    stem = re.sub(r'\.f\d+$', '', video.stem, flags=re.I)
+    target = Path(workdir) / f'{stem}.mp4'
+    target.unlink(missing_ok=True)
+
+    cmd = [
+        'ffmpeg', '-y', '-v', 'error',
+        '-i', str(video), '-i', str(audio),
+        '-map', '0:v:0', '-map', '1:a:0',
+        '-c:v', 'copy', '-c:a', 'copy',
+        '-movflags', '+faststart',
+        str(target),
+    ]
+    run = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if run.returncode != 0:
+        target.unlink(missing_ok=True)
+        cmd = [
+            'ffmpeg', '-y', '-v', 'error',
+            '-i', str(video), '-i', str(audio),
+            '-map', '0:v:0', '-map', '1:a:0',
+            '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+            '-movflags', '+faststart',
+            str(target),
+        ]
+        run = subprocess.run(cmd, capture_output=True, text=True, timeout=360)
+        if run.returncode != 0:
+            raise RuntimeError('YouTube manual merge failed')
+
+    if not target.is_file() or target.stat().st_size < 1024:
+        raise RuntimeError('YouTube merged output missing')
+    types = _probe_stream_types(target)
+    if 'video' not in types or 'audio' not in types:
+        raise RuntimeError('YouTube merged output invalid')
+    return target
+
+
+def _youtube_video_download(url, quality, workdir, job_id=None):
+    cached = legacy.cache_get(url)
+    attempts = youtube_attempts()
+    if cached:
+        preferred = cached.get('strategy', {}).get('name')
+        attempts.sort(key=lambda x: 0 if x.get('name') == preferred else 1)
+
+    errors = []
+    for strategy in attempts:
+        try:
+            if job_id:
+                legacy.job_update(job_id, state='working', progress=10, stage='Membaca sumber')
+
+            opts = base_opts(url, strategy.get('clients'), strategy.get('cookie', False))
+            opts['skip_download'] = True
+            with YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False, process=False)
+            if info and info.get('entries'):
+                info = next((item for item in info['entries'] if item), info)
+            if not info:
+                raise RuntimeError('YouTube metadata empty')
+
+            fmt = legacy.exact_selector(info, quality)
+            if quality in legacy.EXACT_QUALITIES and not fmt:
+                raise RuntimeError(f'exact {quality}p format not present')
+
+            legacy.clear_workdir(workdir)
+            dl = legacy.dl_opts(url, quality, workdir, strategy, fmt, job_id)
+            dl['max_filesize'] = _YOUTUBE_VIDEO_MAX_FILESIZE
+            with YoutubeDL(dl) as ydl:
+                ydl.process_ie_result(copy.deepcopy(info), download=True)
+
+            path = _complete_youtube_output(workdir)
+            if path is None:
+                path = _manual_merge_youtube(workdir)
+
+            legacy.verify_file_quality(path, quality)
+            legacy.cache_put(url, info, strategy)
+            return legacy.add_quality_suffix(path, quality)
+        except Exception as exc:
+            errors.append(f'{strategy.get("name")}:{type(exc).__name__}')
+            print(
+                f'youtube isolated download failed quality={quality} '
+                f'strategy={strategy.get("name")} error={_clean_error(exc)}',
+                flush=True,
+            )
+    raise DownloadError(' | '.join(errors[-6:]) or 'youtube download failed')
+
+
+def download_sync(url, quality, workdir, job_id=None):
+    if not legacy.is_youtube(url):
+        return _ORIGINAL_DOWNLOAD_SYNC(url, quality, workdir, job_id)
+    if quality == 'audio':
+        return _ORIGINAL_DOWNLOAD_SYNC(url, quality, workdir, job_id)
+    return _youtube_video_download(url, quality, workdir, job_id)
 
 
 def _strategy_by_name(name):
@@ -464,10 +376,8 @@ def _network_selftest():
 legacy.base_opts = base_opts
 legacy.youtube_attempts = youtube_attempts
 legacy.extract_info_sync = extract_info_sync
-legacy.download_from_info = download_from_info
 legacy.download_sync = download_sync
-legacy.youtube_error = youtube_error
-legacy.APP_VERSION = '1.15.12'
+legacy.APP_VERSION = '1.15.13'
 app.version = legacy.APP_VERSION
 
 
