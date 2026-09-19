@@ -69,22 +69,35 @@ async function runReference(input,output,brand='mp42'){
  await execChecked(['-i',input,'-map','0:v:0','-map','0:a?','-c','copy','-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-avoid_negative_ts','make_zero','-brand',brand,output]);
 }
 async function runMaxQualityFps(input,output){
- // Preserve the original audio/video bitstreams. The old FPS patch rebuilt the
- // AAC track with synthetic frames; that could change the media structure and
- // make TikTok choose/reprocess the file differently. For this mode we only
- // normalize the MP4 video timing metadata to a 60 fps track while stream-copying
- // the actual video/audio bytes.
+ // Max Quality + FPS: make a real TikTok-friendly H.264 120fps master.
+ // The previous stream-copy/timing-only version still delivered the source's
+ // original 60fps/codec characteristics to TikTok, which is exactly what this
+ // mode is meant to avoid.
+ //
+ // Only this mode is re-encoded. Reference remains a pure remux.
  await execChecked([
   '-i',input,
   '-map','0:v:0',
   '-map','0:a:0?',
-  '-c','copy',
-  '-r','60',
-  '-video_track_timescale','60000',
+  '-vf','fps=120',
+  '-c:v','libx264',
+  '-preset','ultrafast',
+  '-crf','10',
+  '-profile:v','high',
+  '-level:v','5.1',
+  '-pix_fmt','yuv420p',
+  '-r','120',
+  '-g','120',
+  '-keyint_min','120',
+  '-sc_threshold','0',
+  '-bf','2',
+  '-c:a','aac',
+  '-b:a','256k',
+  '-ar','48000',
+  '-ac','2',
   '-map_metadata','-1',
   '-map_chapters','-1',
   '-movflags','+faststart',
-  '-avoid_negative_ts','make_zero',
   '-brand','isom',
   '-metadata','comment=Max Quality + FPS Method',
   output
