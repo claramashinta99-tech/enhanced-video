@@ -310,446 +310,355 @@ async function deleteLocal(name) {
 }
 
 /* =========================================================
-   MP4 Atom Manipulation & Dual-Track Pulse Patch
+   Bit-Perfect Vague Pulse MP4 Atom Engine
 ========================================================= */
-const CONTAINER_BOXES = new Set(['moov', 'trak', 'mdia', 'minf', 'stbl', 'dinf', 'edts', 'udta', 'meta', 'ilst']);
+const y = new Set(["moov", "trak", "mdia", "minf", "stbl", "dinf", "edts", "udta", "meta", "ilst"]);
+const w = [v("avc1"), v("hvc1"), v("hev1"), v("vp09"), v("av01")];
 
-function strToBytes(str) {
-  const out = new Uint8Array(str.length);
-  for (let i = 0; i < str.length; i++) out[i] = str.charCodeAt(i) & 255;
-  return out;
+function v(t) {
+  let e = new Uint8Array(t.length);
+  for (let r = 0; r < t.length; r += 1) e[r] = 255 & t.charCodeAt(r);
+  return e;
 }
-
-function bytesToStr(buf, start = 0, end = buf.length) {
-  let s = '';
-  for (let i = start; i < end; i++) s += String.fromCharCode(buf[i]);
-  return s;
+function E(t, e = 0, r = t.length) {
+  let n = "";
+  for (let i = e; i < r; i += 1) n += String.fromCharCode(t[i]);
+  return n;
 }
-
-function r32(buf, off) {
-  return new DataView(buf.buffer, buf.byteOffset, buf.byteLength).getUint32(off, false);
+function T(t, e) {
+  return new DataView(t.buffer, t.byteOffset, t.byteLength).getUint32(e, false);
 }
-
-function w32(buf, val, off) {
-  new DataView(buf.buffer, buf.byteOffset, buf.byteLength).setUint32(off, val >>> 0, false);
+function F(t, e, r) {
+  new DataView(t.buffer, t.byteOffset, t.byteLength).setUint32(r, e >>> 0, false);
 }
-
-function r64(buf, off) {
-  return new DataView(buf.buffer, buf.byteOffset, buf.byteLength).getBigUint64(off, false);
+function R(t, e) {
+  return new DataView(t.buffer, t.byteOffset, t.byteLength).getBigUint64(e, false);
 }
-
-function w64(buf, val, off) {
-  new DataView(buf.buffer, buf.byteOffset, buf.byteLength).setBigUint64(off, BigInt(val), false);
+function L(t, e, r) {
+  new DataView(t.buffer, t.byteOffset, t.byteLength).setBigUint64(r, BigInt(e), false);
 }
-
-function concat(arrays) {
-  const total = arrays.reduce((acc, curr) => acc + curr.length, 0);
-  const out = new Uint8Array(total);
-  let off = 0;
-  for (const arr of arrays) {
-    out.set(arr, off);
-    off += arr.length;
-  }
-  return out;
+function k(t) {
+  let e = new Uint8Array(t.reduce((t, e) => t + e.length, 0)), r = 0;
+  for (let n of t) e.set(n, r), r += n.length;
+  return e;
 }
-
-function spliceBytes(buf, start, delLen, insertBuf) {
-  return concat([buf.subarray(0, start), insertBuf, buf.subarray(start + delLen)]);
+function V(t, e, r, n) {
+  return k([t.subarray(0, e), n, t.subarray(e + r)]);
 }
-
-function* iterBoxes(buf, start = 0, end = buf.length) {
-  let cur = start;
-  while (cur + 8 <= end) {
-    let sz = r32(buf, cur);
-    const tag = bytesToStr(buf, cur + 4, cur + 8);
-    let payload = cur + 8;
-    if (sz === 1) {
-      sz = Number(r64(buf, cur + 8));
-      payload = cur + 16;
-    } else if (sz === 0) {
-      sz = end - cur;
-      payload = cur + 8;
-    }
-    if (tag === 'meta') payload = cur + 12;
-    yield { tag, start: cur, size: sz, payload, end: cur + sz };
-    cur += sz;
+function* j(t, e = 0, r = t.length) {
+  let n = e;
+  for (; n + 8 <= r; ) {
+    let e, i = T(t, n), o = E(t, n + 4, n + 8);
+    if (i < 8 && i !== 0 && i !== 1) break;
+    1 === i ? (i = Number(R(t, n + 8)), e = n + 16) : (0 === i && (i = r - n), e = n + 8);
+    "meta" === o && (e = n + 12);
+    yield { btype: o, p: n, size: i, cstart: e, cend: n + i };
+    n += i;
   }
 }
-
-function findBoxByPath(buf, path, start = 0, end = buf.length) {
-  if (!path.length) return null;
-  for (const b of iterBoxes(buf, start, end)) {
-    if (b.tag === path[0]) {
-      if (path.length === 1) return b;
-      const sub = findBoxByPath(buf, path.slice(1), b.payload, b.end);
-      if (sub) return sub;
+function W(t, e, r = 0, n = t.length) {
+  if (!e.length) return null;
+  for (let i of j(t, r, n)) {
+    if (i.btype === e[0]) {
+      if (1 === e.length) return i;
+      let r = W(t, e.slice(1), i.cstart, i.cend);
+      if (r) return r;
     }
   }
   return null;
 }
-
-function findAllBoxes(buf, tag, start = 0, end = buf.length, out = []) {
-  for (const b of iterBoxes(buf, start, end)) {
-    if (b.tag === tag) out.push(b);
-    if (CONTAINER_BOXES.has(b.tag)) findAllBoxes(buf, tag, b.payload, b.end, out);
+function findNodes(t, e, r = 0, n = t.length, i = []) {
+  for (let o of j(t, r, n)) {
+    o.btype === e && i.push(o);
+    y.has(o.btype) && findNodes(t, e, o.cstart, o.cend, i);
   }
-  return out;
+  return i;
 }
-
-function getBoxAncestors(buf, targetOffset, start = 0, end = buf.length, ancestors = []) {
-  for (const b of iterBoxes(buf, start, end)) {
-    if (b.size === 0) {
-      if (b.start <= targetOffset && targetOffset < end) ancestors.push(b.start);
+function q(t, e, r = 0, n = t.length, i = []) {
+  for (let o of j(t, r, n)) {
+    if (0 === o.size) {
+      o.p <= e && e < n && i.push(o.p);
       continue;
     }
-    if (b.start <= targetOffset && targetOffset < b.end) {
-      ancestors.push(b.start);
-      getBoxAncestors(buf, targetOffset, b.payload, b.end, ancestors);
+    if (o.p <= e && e < o.cend) {
+      i.push(o.p);
+      q(t, e, o.cstart, o.cend, i);
       break;
     }
   }
-  return ancestors;
+  return i;
 }
-
-function getStcoBox(buf, trakBox) {
-  return findBoxByPath(buf, ['mdia', 'minf', 'stbl', 'stco'], trakBox.payload, trakBox.end) ||
-         findBoxByPath(buf, ['mdia', 'minf', 'stbl', 'co64'], trakBox.payload, trakBox.end);
+function X(t, e) {
+  return W(t, ["mdia", "minf", "stbl", "stco"], e.cstart, e.cend) || W(t, ["mdia", "minf", "stbl", "co64"], e.cstart, e.cend);
 }
-
-function readChunkOffsets(buf, stcoBox) {
-  const count = r32(buf, stcoBox.payload + 4);
-  const entrySize = stcoBox.tag === 'co64' ? 8 : 4;
-  const offsets = [];
-  let off = stcoBox.payload + 8;
-  for (let i = 0; i < count; i++) {
-    offsets.push(entrySize === 8 ? Number(r64(buf, off)) : r32(buf, off));
-    off += entrySize;
-  }
-  return { count, offsets, entrySize };
+function Y(t, e) {
+  let r = T(t, e.cstart + 4), n = [], i = "co64" === e.btype ? 8 : 4, o = e.cstart + 8;
+  for (let e = 0; e < r; e += 1) n.push(8 === i ? Number(R(t, o)) : T(t, o)), o += i;
+  return { count: r, offsets: n, entrySize: i };
 }
-
-function adjustAllChunkOffsets(buf, delta) {
-  for (const b of [...findAllBoxes(buf, 'stco'), ...findAllBoxes(buf, 'co64')]) {
-    const { count, entrySize } = readChunkOffsets(buf, b);
-    let off = b.payload + 8;
-    for (let i = 0; i < count; i++) {
-      if (entrySize === 8) {
-        w64(buf, Number(r64(buf, off)) + delta, off);
-      } else {
-        w32(buf, r32(buf, off) + delta, off);
-      }
-      off += entrySize;
-    }
+function Z(t, e) {
+  return 1 === t[e.cstart] ? e.cstart + 20 : e.cstart + 12;
+}
+function H(t, e) {
+  for (let r of [...findNodes(t, "stco"), ...findNodes(t, "co64")]) {
+    let { count: n, entrySize: i } = Y(t, r), o = r.cstart + 8;
+    for (let r = 0; r < n; r += 1) 8 === i ? L(t, Number(R(t, o)) + e, o) : F(t, T(t, o) + e, o), o += i;
   }
 }
-
-function replaceBoxAndUpdateAncestors(buf, oldBox, newBytes) {
-  const diff = newBytes.length - oldBox.size;
-  const spliced = spliceBytes(buf, oldBox.start, oldBox.size, newBytes);
-  const ancestors = getBoxAncestors(spliced, oldBox.start).slice(0, -1);
-  for (const anc of ancestors) {
-    w32(spliced, r32(spliced, anc) + diff, anc);
+function K(t, e, r) {
+  var n, i;
+  let o = r.length - e.size;
+  for (let a of (n = t = V(t, e.p, e.size, r), i = e.p, F(n, r.length, i), q(t, e.p).slice(0, -1))) {
+    F(t, T(t, a) + o, a);
   }
-  return spliced;
+  return t;
 }
-
-function makeBox(tag, payload) {
-  const tagBytes = typeof tag === 'string' ? strToBytes(tag) : tag;
-  const out = new Uint8Array(8 + payload.length);
-  w32(out, out.length, 0);
-  out.set(tagBytes, 4);
-  out.set(payload, 8);
-  return out;
+function J(t, e) {
+  let r = "string" == typeof t ? v(t) : t, n = new Uint8Array(8 + e.length);
+  return F(n, n.length, 0), n.set(r, 4), n.set(e, 8), n;
 }
-
-function getAudioTrack(buf, index = 0) {
-  const tracks = findAllBoxes(buf, 'trak');
-  const audioTracks = [];
-  const audioCodecs = [strToBytes('mp4a'), strToBytes('ac-3'), strToBytes('ec-3'), strToBytes('Opus')];
-  for (const trk of tracks) {
-    const stsd = findBoxByPath(buf, ['mdia', 'minf', 'stbl', 'stsd'], trk.payload, trk.end);
-    if (!stsd) continue;
-    const stsdPayload = buf.subarray(stsd.payload, stsd.end);
-    const hasAudioCodec = audioCodecs.some(c => {
-      for (let i = 0; i <= stsdPayload.length - c.length; i++) {
-        let match = true;
-        for (let j = 0; j < c.length; j++) {
-          if (stsdPayload[i + j] !== c[j]) { match = false; break; }
+function Q(t, e = 0) {
+  let r = function(t) {
+    let e = [], r = findNodes(t, "trak"), n = [v("mp4a"), v("ac-3"), v("ec-3"), v("Opus")];
+    for (let i of r) {
+      let r = W(t, ["mdia", "minf", "stbl", "stsd"], i.cstart, i.cend);
+      if (!r) continue;
+      let o = t.subarray(r.cstart, r.cend);
+      n.some(t => {
+        if (!t.length) return false;
+        for (let e = 0; e <= o.length - t.length; e += 1) {
+          let r = true;
+          for (let n = 0; n < t.length; n += 1) if (o[e + n] !== t[n]) { r = false; break; }
+          if (r) return true;
         }
-        if (match) return true;
-      }
-      return false;
-    });
-    if (hasAudioCodec) audioTracks.push(trk);
-  }
-  const idx = index < 0 ? audioTracks.length + index : index;
-  return audioTracks[idx] || null;
+        return false;
+      }) && e.push(i);
+    }
+    return e;
+  }(t);
+  let n = e < 0 ? r.length + e : e;
+  return r[n] || null;
 }
 
-function getTrackIdOffset(buf, tkhdBox) {
-  return buf[tkhdBox.payload] === 1 ? tkhdBox.payload + 20 : tkhdBox.payload + 12;
-}
-
-function applyVaguePulsePatch(buffer, factor = 10, artist = 'transcode.vague-infinity.com') {
+function applyVaguePulsePatch(buffer, factor = 10, artist = "transcode.vague-infinity.com") {
   let p = buffer;
 
   // 1. Remove free and skip boxes
-  p = (t => {
-    const mdat = findBoxByPath(t, ['mdat']);
-    const mdatStart = mdat ? mdat.start : Infinity;
-    for (const b of [...iterBoxes(t, 0, t.length)].reverse()) {
-      if (b.tag !== 'free' && b.tag !== 'skip') continue;
-      const isBeforeMdat = b.start < mdatStart;
-      t = spliceBytes(t, b.start, b.size, new Uint8Array(0));
-      if (isBeforeMdat) adjustAllChunkOffsets(t, -b.size);
+  p = function(t) {
+    let e = W(t, ["mdat"]), r = e ? e.p : 1 / 0;
+    for (let e of [...j(t, 0, t.length)].reverse()) {
+      if ("free" !== e.btype && "skip" !== e.btype) continue;
+      let n = e.p < r;
+      t = V(t, e.p, e.size, new Uint8Array(0));
+      n && H(t, -e.size);
     }
     return t;
-  })(p);
+  }(p);
 
   // 2. Normalize hdlr to VideoHandle / SoundHandle
-  p = (t => {
-    const hdlrs = [];
-    for (const b of findAllBoxes(t, 'hdlr')) {
-      const htype = bytesToStr(t, b.payload + 8, b.payload + 12);
-      if (htype === 'vide' || htype === 'soun') hdlrs.push({ box: b, type: htype });
+  p = function(t) {
+    var e, r, n;
+    let i = [];
+    for (let e of findNodes(t, "hdlr")) {
+      let r = E(t, e.cstart + 8, e.cstart + 12);
+      ("vide" === r || "soun" === r) && i.push({ box: e, type: r });
     }
-    hdlrs.sort((a, b) => b.box.start - a.box.start);
-    for (const { box, type } of hdlrs) {
-      const fixedName = type === 'vide' ? strToBytes('VideoHandle\0') : strToBytes('SoundHandle\0');
-      const nameStart = box.payload + 24;
-      let len = 0;
-      while (nameStart + len < t.length && t[nameStart + len] !== 0) len++;
-      const curLen = len + 1;
-      if (curLen === fixedName.length) continue;
-      const diff = curLen - fixedName.length;
-      t = spliceBytes(t, nameStart + fixedName.length, diff, new Uint8Array(0));
-      t.set(fixedName, nameStart);
-      w32(t, box.size - diff, box.start);
-      for (const anc of getBoxAncestors(t, box.start).slice(0, -1)) {
-        w32(t, r32(t, anc) - diff, anc);
-      }
-      adjustAllChunkOffsets(t, -diff);
+    for (let { box: o, type: a } of (i.sort((t, e) => e.box.p - t.box.p), i)) {
+      let i = "vide" === a ? v("VideoHandle\0") : v("SoundHandle\0");
+      let s = o.cstart + 24, f = 0;
+      for (; s + f < t.length && 0 !== t[s + f]; ) f += 1;
+      let u = f + 1;
+      if (u === i.length) continue;
+      let l = u - i.length;
+      for (let a of ((t = V(t, s + i.length, l, new Uint8Array(0))).set(i, s), e = t, r = o.p, F(e, o.size - l, r), q(t, o.p).slice(0, -1)))
+        n = t, F(n, T(t, a) - l, a);
+      H(t, -l);
     }
     return t;
-  })(p);
+  }(p);
 
   // 3. Strip edts from all tracks
-  p = (t => {
-    const traks = findAllBoxes(t, 'trak');
-    traks.sort((a, b) => b.start - a.start);
-    for (const trk of traks) {
-      const edts = findBoxByPath(t, ['trak', 'edts'], trk.start, trk.end);
-      if (edts) {
-        t = spliceBytes(t, edts.start, edts.size, new Uint8Array(0));
-        w32(t, trk.size - edts.size, trk.start);
-        for (const anc of getBoxAncestors(t, trk.start).slice(0, -1)) {
-          w32(t, r32(t, anc) - edts.size, anc);
-        }
-        adjustAllChunkOffsets(t, -edts.size);
+  p = function(t) {
+    let e = findNodes(t, "trak");
+    for (let o of (e.sort((t, e) => e.p - t.p), e)) {
+      let e = W(t, ["trak", "edts"], o.p, o.cend);
+      if (e) {
+        var r, n, i;
+        for (let a of (r = t = V(t, e.p, e.size, new Uint8Array(0)), n = o.p, F(r, o.size - e.size, n), q(t, o.p).slice(0, -1)))
+          i = t, F(i, T(t, a) - e.size, a);
+        H(t, -e.size);
       }
     }
     return t;
-  })(p);
+  }(p);
 
-  // 4. Duplicate audio track 0 as Track 3
-  p = (t => {
-    const audioTrack = getAudioTrack(t, 0);
-    const moov = findBoxByPath(t, ['moov']);
-    if (!audioTrack || !moov) return t;
-    let maxTrackId = 0;
-    for (const trk of findAllBoxes(t, 'trak')) {
-      const tkhd = findBoxByPath(t, ['tkhd'], trk.payload, trk.end);
-      if (tkhd) maxTrackId = Math.max(maxTrackId, r32(t, getTrackIdOffset(t, tkhd)));
+  // 4. Duplicate audio track as Track 3
+  p = function(t) {
+    var e, r;
+    let n = Q(t, 0), i = W(t, ["moov"]);
+    if (!n || !i) return t;
+    let o = findNodes(t, "trak"), a = 0;
+    for (let e of o) {
+      let r = W(t, ["tkhd"], e.cstart, e.cend);
+      r && (a = Math.max(a, T(t, Z(t, r))));
     }
-    const nextTrackId = maxTrackId + 1;
-    const cloneBytes = t.slice(audioTrack.start, audioTrack.end);
-    const cloneTkhd = findBoxByPath(cloneBytes, ['tkhd'], 8, cloneBytes.length);
-    if (!cloneTkhd) throw new Error('Audio clone missing tkhd');
-    w32(cloneBytes, nextTrackId, getTrackIdOffset(cloneBytes, cloneTkhd));
-
-    t = spliceBytes(t, moov.end, 0, cloneBytes);
-    w32(t, moov.size + cloneBytes.length, moov.start);
-    adjustAllChunkOffsets(t, cloneBytes.length);
-
-    const mvhd = findBoxByPath(t, ['moov', 'mvhd']);
-    if (mvhd) {
-      const nextTrackOff = t[mvhd.payload] === 1 ? mvhd.payload + 108 : mvhd.payload + 96;
-      w32(t, nextTrackId + 1, nextTrackOff);
+    let s = a + 1, f = t.slice(n.p, n.cend), u = W(f, ["tkhd"], 8, f.length);
+    if (!u) return t;
+    F(f, s, Z(f, u));
+    e = t = V(t, i.cend, 0, f);
+    r = i.p;
+    F(e, i.size + f.length, r);
+    H(t, f.length);
+    let l = W(t, ["moov", "mvhd"]);
+    if (l) {
+      let e = 1 === t[l.cstart] ? l.cstart + 108 : l.cstart + 96;
+      F(t, s + 1, e);
     }
     return t;
-  })(p);
+  }(p);
 
   // 5. Strip edts from duplicated track
-  p = ((t, trackIndex = -1) => {
-    const trk = getAudioTrack(t, trackIndex);
-    if (!trk) return t;
-    const edts = findBoxByPath(t, ['edts'], trk.payload, trk.end);
-    if (!edts) return t;
-    t = spliceBytes(t, edts.start, edts.size, new Uint8Array(0));
-    for (const anc of getBoxAncestors(t, edts.start).slice(0, -1)) {
-      w32(t, r32(t, anc) - edts.size, anc);
+  p = function(t, e = 0) {
+    let r = Q(t, e);
+    if (!r) return t;
+    let n = W(t, ["edts"], r.cstart, r.cend);
+    if (!n) return t;
+    for (let e of q(t = V(t, n.p, n.size, new Uint8Array(0)), n.p).slice(0, -1)) {
+      var i;
+      i = t, F(i, T(t, e) - n.size, e);
     }
-    adjustAllChunkOffsets(t, -edts.size);
+    return H(t, -n.size), t;
+  }(p, -1);
+
+  // 6. Factor 10 patch on Track 3
+  p = function(t, e = 10, r = -1) {
+    var n;
+    let i, o, a = Q(t, r);
+    if (!a) return t;
+    let s = W(t, ["mdia", "minf", "stbl", "stsz"], a.cstart, a.cend),
+        f = W(t, ["mdia", "minf", "stbl", "stsc"], a.cstart, a.cend),
+        u = X(t, a);
+    if (!s || !f || !u) return t;
+    let l = T(t, s.cstart + 4), c = T(t, s.cstart + 8),
+        h = Y(t, u), p_chunks = h.count, d = h.entrySize, y_val = T(t, f.cstart + 4);
+    if (0 !== l) return t;
+    let g = c * (e - 1);
+    if (g <= 0) return t;
+    let m = 0, b = t.subarray(s.p, s.cend), w_box = new Uint8Array(b.length + 4 * g);
+    w_box.set(b);
+    F(w_box, c + g, 16);
+    for (let t = b.length; t < w_box.length; t += 4) F(w_box, 8, t);
+    t = K(t, s, w_box);
+    m += w_box.length - b.length;
+
+    let v_trk = Q(t, r);
+    if (!v_trk) return t;
+    let E_stco = X(t, v_trk);
+    if (!E_stco) return t;
+    let A = t.subarray(E_stco.p, E_stco.cend), U = new Uint8Array(A.length + d);
+    U.set(A);
+    F(U, p_chunks + 1, 12);
+    8 === d ? L(U, 0, A.length) : F(U, 0, A.length);
+    t = K(t, E_stco, U);
+    m += d;
+
+    v_trk = Q(t, r);
+    if (!v_trk) return t;
+    let B = W(t, ["mdia", "minf", "stbl", "stsc"], v_trk.cstart, v_trk.cend);
+    if (!B) return t;
+    let R_box = t.subarray(B.p, B.cend), k_box = new Uint8Array(R_box.length + 12);
+    k_box.set(R_box);
+    F(k_box, y_val + 1, 12);
+    F(k_box, p_chunks + 1, R_box.length);
+    F(k_box, g, R_box.length + 4);
+    F(k_box, 1, R_box.length + 8);
+    t = K(t, B, k_box);
+    H(t, m += 12);
+
+    let x = W(t, ["mdat"]);
+    v_trk = Q(t, r);
+    if (!v_trk) return t;
+    let M = X(t, v_trk);
+    if (!x || !M) return t;
+    let O = x.cend;
+    n = t;
+    i = "co64" === M.btype ? 8 : 4;
+    o = M.cstart + 8 + p_chunks * i;
+    8 === i ? L(n, O, o) : F(n, O, o);
+    let S = new Uint8Array(8 * g);
+    for (let t = 0; t < g; t += 1) F(S, 4, 8 * t), F(S, 0, 8 * t + 4);
+    return V(t, O, 0, S);
+  }(p, factor, -1);
+
+  // 7. Update stts for Track 3
+  p = function(t, e = -1) {
+    let r = Q(t, e);
+    if (!r) return t;
+    let n = W(t, ["mdia", "minf", "stbl", "stts"], r.cstart, r.cend),
+        i = W(t, ["mdia", "minf", "stbl", "stsz"], r.cstart, r.cend);
+    if (!n || !i) return t;
+    let o = T(t, i.cstart + 8), a = T(t, n.cstart + 4), s = [], f = 0, u = n.cstart + 8;
+    for (let e = 0; e < a; e += 1) {
+      let e = T(t, u), r = T(t, u + 4);
+      s.push([e, r]);
+      f += e;
+      u += 8;
+    }
+    let l = o - f;
+    if (l <= 0) return t;
+    let c = [], h = f;
+    for (let [t, e] of s) {
+      if (h <= 0) break;
+      let r = Math.min(t, h);
+      c.push([r, e]);
+      h -= r;
+    }
+    c.push([l, 1]);
+    let d = new Uint8Array(16 + 8 * c.length);
+    let orig = t.subarray(n.p, n.cend);
+    d.set(orig.subarray(0, Math.min(orig.length, d.length)));
+    F(d, c.length, 12);
+    u = 16;
+    for (let [t, e] of c) {
+      F(d, t, u);
+      F(d, e, u + 4);
+      u += 8;
+    }
+    t = K(t, n, d);
+    H(t, d.length - orig.length);
     return t;
-  })(p, -1);
+  }(p, -1);
 
-  // 6. Factor patch on Track 3 (appends trailing samples & chunk)
-  p = ((t, mult = 10, trackIndex = -1) => {
-    let trk = getAudioTrack(t, trackIndex);
-    if (!trk) return t;
-    const stsz = findBoxByPath(t, ['mdia', 'minf', 'stbl', 'stsz'], trk.payload, trk.end);
-    const stsc = findBoxByPath(t, ['mdia', 'minf', 'stbl', 'stsc'], trk.payload, trk.end);
-    const stco = getStcoBox(t, trk);
-    if (!stsz || !stsc || !stco) return t;
-
-    const sampleSize = r32(t, stsz.payload + 4);
-    const sampleCount = r32(t, stsz.payload + 8);
-    const { count: chunkCount, entrySize } = readChunkOffsets(t, stco);
-    const stscEntryCount = r32(t, stsc.payload + 4);
-    if (sampleSize !== 0) return t;
-
-    const extraSamples = sampleCount * (mult - 1);
-    if (extraSamples <= 0) return t;
-
-    // Expand stsz
-    let delta = 0;
-    const origStsz = t.subarray(stsz.start, stsz.end);
-    const newStsz = new Uint8Array(origStsz.length + 4 * extraSamples);
-    newStsz.set(origStsz);
-    w32(newStsz, sampleCount + extraSamples, 16);
-    for (let i = origStsz.length; i < newStsz.length; i += 4) {
-      w32(newStsz, 8, i); // sample size = 8 bytes
-    }
-    t = replaceBoxAndUpdateAncestors(t, stsz, newStsz);
-    delta += newStsz.length - origStsz.length;
-
-    // Expand stco
-    trk = getAudioTrack(t, trackIndex);
-    const curStco = getStcoBox(t, trk);
-    const origStco = t.subarray(curStco.start, curStco.end);
-    const newStco = new Uint8Array(origStco.length + entrySize);
-    newStco.set(origStco);
-    w32(newStco, chunkCount + 1, 12);
-    if (entrySize === 8) {
-      w64(newStco, 0, origStco.length);
-    } else {
-      w32(newStco, 0, origStco.length);
-    }
-    t = replaceBoxAndUpdateAncestors(t, curStco, newStco);
-    delta += entrySize;
-
-    // Expand stsc
-    trk = getAudioTrack(t, trackIndex);
-    const curStsc = findBoxByPath(t, ['mdia', 'minf', 'stbl', 'stsc'], trk.payload, trk.end);
-    const origStsc = t.subarray(curStsc.start, curStsc.end);
-    const newStsc = new Uint8Array(origStsc.length + 12);
-    newStsc.set(origStsc);
-    w32(newStsc, stscEntryCount + 1, 12);
-    w32(newStsc, chunkCount + 1, origStsc.length);
-    w32(newStsc, extraSamples, origStsc.length + 4);
-    w32(newStsc, 1, origStsc.length + 8);
-    t = replaceBoxAndUpdateAncestors(t, curStsc, newStsc);
-    delta += 12;
-    adjustAllChunkOffsets(t, delta);
-
-    // Append trailing payload at end of mdat
-    const mdat = findBoxByPath(t, ['mdat']);
-    trk = getAudioTrack(t, trackIndex);
-    const finalStco = getStcoBox(t, trk);
-    if (!mdat || !finalStco) return t;
-
-    const mdatEnd = mdat.end;
-    const isCo64 = finalStco.tag === 'co64';
-    const lastChunkPos = finalStco.payload + 8 + chunkCount * (isCo64 ? 8 : 4);
-    if (isCo64) {
-      w64(t, mdatEnd, lastChunkPos);
-    } else {
-      w32(t, mdatEnd, lastChunkPos);
-    }
-
-    const trailingPayload = new Uint8Array(8 * extraSamples);
-    for (let i = 0; i < extraSamples; i++) {
-      w32(trailingPayload, 4, 8 * i);
-      w32(trailingPayload, 0, 8 * i + 4);
-    }
-    return spliceBytes(t, mdatEnd, 0, trailingPayload);
-  })(p, factor, -1);
-
-  // 7. Update Track 3 stts
-  p = ((t, trackIndex = -1) => {
-    const trk = getAudioTrack(t, trackIndex);
-    if (!trk) return t;
-    const stts = findBoxByPath(t, ['mdia', 'minf', 'stbl', 'stts'], trk.payload, trk.end);
-    const stsz = findBoxByPath(t, ['mdia', 'minf', 'stbl', 'stsz'], trk.payload, trk.end);
-    if (!stts || !stsz) return t;
-
-    const totalSamples = r32(t, stsz.payload + 8);
-    const sttsCount = r32(t, stts.payload + 4);
-    const entries = [];
-    let sumSamples = 0;
-    let ptr = stts.payload + 8;
-    for (let i = 0; i < sttsCount; i++) {
-      const sc = r32(t, ptr), sd = r32(t, ptr + 4);
-      entries.push([sc, sd]);
-      sumSamples += sc;
-      ptr += 8;
-    }
-    const remaining = totalSamples - sumSamples;
-    if (remaining <= 0) return t;
-
-    const newEntries = [];
-    let rem = sumSamples;
-    for (const [sc, sd] of entries) {
-      if (rem <= 0) break;
-      const count = Math.min(sc, rem);
-      newEntries.push([count, sd]);
-      rem -= count;
-    }
-    newEntries.push([remaining, 1]);
-
-    const origStts = t.subarray(stts.start, stts.end);
-    const newStts = new Uint8Array(16 + 8 * newEntries.length);
-    newStts.set(origStts.subarray(0, Math.min(origStts.length, newStts.length)));
-    w32(newStts, newEntries.length, 12);
-    ptr = 16;
-    for (const [sc, sd] of newEntries) {
-      w32(newStts, sc, ptr);
-      w32(newStts, sd, ptr + 4);
-      ptr += 8;
-    }
-    t = replaceBoxAndUpdateAncestors(t, stts, newStts);
-    adjustAllChunkOffsets(t, newStts.length - origStts.length);
+  // 8. Strip old udta
+  p = function(t) {
+    var e, r;
+    let n = W(t, ["moov"]);
+    if (!n) return t;
+    let i = W(t, ["moov", "udta"]);
+    if (!i) return t;
+    e = t = V(t, i.p, i.size, new Uint8Array(0));
+    r = n.p;
+    F(e, n.size - i.size, r);
+    H(t, -i.size);
     return t;
-  })(p, -1);
+  }(p);
 
-  // 8. Remove old udta
-  p = (t => {
-    const moov = findBoxByPath(t, ['moov']);
-    if (!moov) return t;
-    const udta = findBoxByPath(t, ['moov', 'udta']);
-    if (!udta) return t;
-    t = spliceBytes(t, udta.start, udta.size, new Uint8Array(0));
-    w32(t, moov.size - udta.size, moov.start);
-    adjustAllChunkOffsets(t, -udta.size);
-    return t;
-  })(p);
+  // 9. Inject udta
+  let udta = function(t = artist) {
+    let e = new TextEncoder().encode(t),
+        r = J("data", k([new Uint8Array([0, 0, 0, 1]), new Uint8Array(4), e])),
+        n = J(new Uint8Array([169, 65, 82, 84]), r),
+        i = J("ilst", n),
+        o = J("hdlr", k([new Uint8Array(8), v("mdir"), new Uint8Array(12), v("appl\0")])),
+        a = J("meta", k([new Uint8Array(4), o, i]));
+    return J("udta", a);
+  }(artist);
 
-  // 9. Inject clean udta metadata
-  const udtaPayload = (() => {
-    const artistBytes = new TextEncoder().encode(artist);
-    const dataBox = makeBox('data', concat([new Uint8Array([0, 0, 0, 1]), new Uint8Array(4), artistBytes]));
-    const artBox = makeBox(new Uint8Array([169, 65, 82, 84]), dataBox);
-    const ilstBox = makeBox('ilst', artBox);
-    const hdlrBox = makeBox('hdlr', concat([new Uint8Array(8), strToBytes('mdir'), new Uint8Array(12), strToBytes('appl\0')]));
-    const metaBox = makeBox('meta', concat([new Uint8Array(4), hdlrBox, ilstBox]));
-    return makeBox('udta', metaBox);
-  })();
-
-  const moov = findBoxByPath(p, ['moov']);
+  let moov = W(p, ["moov"]);
   if (moov) {
-    p = spliceBytes(p, moov.end, 0, udtaPayload);
-    w32(p, moov.size + udtaPayload.length, moov.start);
-    adjustAllChunkOffsets(p, udtaPayload.length);
+    let g = p = V(p, moov.cend, 0, udta);
+    F(g, moov.size + udta.length, moov.p);
+    H(p, udta.length);
   }
 
   return p;
@@ -838,7 +747,12 @@ $('#process')?.addEventListener('click', async () => {
     // 2. Read remux output & apply bit-level dual-track pulse patch
     const rawOut = await ffmpeg.readFile(tempOutput);
     const rawBytes = rawOut instanceof Uint8Array ? rawOut : new Uint8Array(rawOut);
-    const patchedBytes = applyVaguePulsePatch(rawBytes, 10, 'transcode.vague-infinity.com');
+    let patchedBytes = rawBytes;
+    try {
+      patchedBytes = applyVaguePulsePatch(rawBytes, 10, 'transcode.vague-infinity.com');
+    } catch (patchErr) {
+      console.warn('Pulse patch fallback to clean faststart MP4:', patchErr);
+    }
 
     // 3. Build downloadable Blob
     const blob = new Blob([patchedBytes], { type: 'video/mp4' });
