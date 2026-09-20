@@ -111,21 +111,50 @@ function buildFpsPatch(mainAudio,info){
 async function runReference(input,output,brand='mp42'){
  await execChecked(['-i',input,'-map','0:v:0','-map','0:a?','-c','copy','-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-avoid_negative_ts','make_zero','-brand',brand,output]);
 }
+function patchMovieDuration(buf){
+ // Patch only the mvhd (movie header) duration to match the video track duration.
+ // The patch audio track is intentionally left at its full length — this is the
+ // CompressBase structure: movie_duration = video duration, patch audio > video.
+ const view=new DataView(buf.buffer,buf.byteOffset,buf.byteLength);
+ const r32=o=>view.getUint32(o);
+ let mvhdOff=-1,mvhdVer=0,movieTs=0,vidTs=0,vidDur=0;
+ function scan(s,e,depth,inVid){
+  if(depth>8)return;
+  let i=s;
+  while(i+8<=e){
+   const sz=r32(i);if(sz<8||i+sz>e)break;
+   const t=String.fromCharCode(buf[i+4],buf[i+5],buf[i+6],buf[i+7]);
+   if(t==='mvhd'){mvhdVer=buf[i+8];mvhdOff=i+8;movieTs=mvhdVer===0?r32(i+20):r32(i+28);}
+   if(t==='trak'){
+    const sl=buf.subarray(i+8,i+sz);let v=false;
+    for(let k=0;k+3<sl.length;k++){if(sl[k]===0x76&&sl[k+1]===0x69&&sl[k+2]===0x64&&sl[k+3]===0x65){v=true;break;}}
+    scan(i+8,i+sz,depth+1,v);i+=sz;continue;
+   }
+   if(t==='mdhd'&&inVid){
+    const ver=buf[i+8];
+    if(ver===0){vidTs=r32(i+20);vidDur=r32(i+24);}
+    else{vidTs=r32(i+28);vidDur=Number(view.getBigUint64(i+32));}
+   }
+   if(['moov','mdia','minf','stbl','edts'].includes(t))scan(i+8,i+sz,depth+1,inVid);
+   i+=sz;
+  }
+ }
+ scan(0,buf.length,0,false);
+ if(mvhdOff<0||!movieTs||!vidTs||!vidDur)return buf;
+ const correctDur=Math.ceil(vidDur/vidTs*movieTs);
+ if(mvhdVer===0)view.setUint32(mvhdOff+16,correctDur);
+ else{view.setUint32(mvhdOff+24,0);view.setUint32(mvhdOff+28,correctDur);}
+ return buf;
+}
 async function runMaxQualityFps(input,output){
  // 120 FPS is the maximum supported frame rate, not a forced target.
  // The source video stream is copied untouched; the AAC patch mirrors the
  // CompressBase-style container/track structure without generating frames.
- // Output is clamped to the original video duration so movie_duration stays
- // consistent with the video track — prevents TikTok from treating the file
- // as malformed and falling back to heavy compression.
+ // After mux, patchMovieDuration() fixes the mvhd duration to match the
+ // video track — patch audio stays at full length, exactly like CompressBase.
 
  const mainAac='rvl-main.aac',patchAac='rvl-fps-patch.aac';
  let patchApplied=false;
-
- // Grab video duration from the already-loaded preview element
- const videoEl=document.querySelector('#preview');
- const vidDuration=(isFinite(videoEl?.duration)&&videoEl.duration>0)?String(videoEl.duration):null;
-
  try{
   const extractCode=await ffmpeg.exec(['-i',input,'-map','0:a:0','-c:a','copy','-f','adts',mainAac]);
   if(typeof extractCode==='number'&&extractCode!==0)throw new Error('Primary AAC track unavailable');
@@ -138,10 +167,13 @@ async function runMaxQualityFps(input,output){
   const videoSetts="setts=pts='PTS-STARTDTS':dts='DTS-STARTDTS'";
   const mainAudioSetts="setts=pts='PTS-STARTPTS':dts='DTS-STARTPTS'";
   const patchSetts=`setts=pts='if(lt(N,${n}),N*1024,${end}+(N-${n}))':dts='if(lt(N,${n}),N*1024,${end}+(N-${n}))':duration='if(lt(N,${n}),1024,1)':time_base=1/${info.sampleRate}`;
-  const cmd=['-i',input,'-f','aac','-i',patchAac,'-map','0:v:0','-map','0:a:0?','-map','1:a:0','-c','copy','-bsf:v',videoSetts,'-bsf:a:0',mainAudioSetts,'-bsf:a:1',patchSetts,'-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-brand','isom','-metadata','comment=Patched by RVL TikTok Method'];
-  if(vidDuration)cmd.push('-t',vidDuration);
-  cmd.push(output);
+  const cmd=['-i',input,'-f','aac','-i',patchAac,'-map','0:v:0','-map','0:a:0?','-map','1:a:0','-c','copy','-bsf:v',videoSetts,'-bsf:a:0',mainAudioSetts,'-bsf:a:1',patchSetts,'-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-brand','isom','-metadata','comment=Patched by RVL TikTok Method',output];
   await execChecked(cmd);
+  // Post-process: patch mvhd duration to match video track (patch audio stays long)
+  const rawOut=await ffmpeg.readFile(output);
+  const rawBytes=rawOut instanceof Uint8Array?rawOut:new Uint8Array(rawOut);
+  const patched=patchMovieDuration(rawBytes);
+  await ffmpeg.writeFile(output,patched);
   patchApplied=true;
  }catch(err){
   console.warn('Max Quality + FPS patch fallback:',err);
