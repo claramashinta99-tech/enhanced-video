@@ -1,5 +1,6 @@
-await import(`/assets/clarity.js?route=${Date.now()}`);
-
+if(window.location.pathname.includes('/clarity/')){
+ await import(`/assets/clarity.js?v=${Date.now()}`);
+}
 const isMethodRoute=()=>location.pathname==='/clarity/'||location.pathname==='/clarity';
 
 const copy={
