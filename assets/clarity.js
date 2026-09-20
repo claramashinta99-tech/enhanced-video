@@ -115,9 +115,17 @@ async function runMaxQualityFps(input,output){
  // 120 FPS is the maximum supported frame rate, not a forced target.
  // The source video stream is copied untouched; the AAC patch mirrors the
  // CompressBase-style container/track structure without generating frames.
+ // Output is clamped to the original video duration so movie_duration stays
+ // consistent with the video track — prevents TikTok from treating the file
+ // as malformed and falling back to heavy compression.
 
  const mainAac='rvl-main.aac',patchAac='rvl-fps-patch.aac';
  let patchApplied=false;
+
+ // Grab video duration from the already-loaded preview element
+ const videoEl=document.querySelector('#preview');
+ const vidDuration=(isFinite(videoEl?.duration)&&videoEl.duration>0)?String(videoEl.duration):null;
+
  try{
   const extractCode=await ffmpeg.exec(['-i',input,'-map','0:a:0','-c:a','copy','-f','adts',mainAac]);
   if(typeof extractCode==='number'&&extractCode!==0)throw new Error('Primary AAC track unavailable');
@@ -130,7 +138,10 @@ async function runMaxQualityFps(input,output){
   const videoSetts="setts=pts='PTS-STARTDTS':dts='DTS-STARTDTS'";
   const mainAudioSetts="setts=pts='PTS-STARTPTS':dts='DTS-STARTPTS'";
   const patchSetts=`setts=pts='if(lt(N,${n}),N*1024,${end}+(N-${n}))':dts='if(lt(N,${n}),N*1024,${end}+(N-${n}))':duration='if(lt(N,${n}),1024,1)':time_base=1/${info.sampleRate}`;
-  await execChecked(['-i',input,'-f','aac','-i',patchAac,'-map','0:v:0','-map','0:a:0?','-map','1:a:0','-c','copy','-bsf:v',videoSetts,'-bsf:a:0',mainAudioSetts,'-bsf:a:1',patchSetts,'-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-brand','isom','-metadata','comment=Patched by RVL TikTok Method',output]);
+  const cmd=['-i',input,'-f','aac','-i',patchAac,'-map','0:v:0','-map','0:a:0?','-map','1:a:0','-c','copy','-bsf:v',videoSetts,'-bsf:a:0',mainAudioSetts,'-bsf:a:1',patchSetts,'-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-brand','isom','-metadata','comment=Patched by RVL TikTok Method'];
+  if(vidDuration)cmd.push('-t',vidDuration);
+  cmd.push(output);
+  await execChecked(cmd);
   patchApplied=true;
  }catch(err){
   console.warn('Max Quality + FPS patch fallback:',err);
