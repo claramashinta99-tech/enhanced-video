@@ -114,15 +114,20 @@ async function runReference(input,output,brand='mp42'){
 function patchMovieDuration(buf){
  const view=new DataView(buf.buffer,buf.byteOffset,buf.byteLength);
  const r32=o=>view.getUint32(o);
- let mvhdOff=-1,mvhdVer=0,movieTs=0,vidTs=0,vidDur=0;
+ const cbUdta = new Uint8Array([0x00, 0x00, 0x01, 0x0e, 0x75, 0x64, 0x74, 0x61, 0x00, 0x00, 0x00, 0x8d, 0x6d, 0x65, 0x74, 0x61, 0x00, 0x00, 0x00, 0x85, 0x00, 0x00, 0x00, 0x21, 0x68, 0x64, 0x6c, 0x72, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6d, 0x64, 0x69, 0x72, 0x61, 0x70, 0x70, 0x6c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x60, 0x69, 0x6c, 0x73, 0x74, 0x00, 0x00, 0x00, 0x25, 0xa9, 0x74, 0x6f, 0x6f, 0x00, 0x00, 0x00, 0x1d, 0x64, 0x61, 0x74, 0x61, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x4c, 0x61, 0x76, 0x66, 0x35, 0x39, 0x2e, 0x32, 0x37, 0x2e, 0x31, 0x30, 0x30, 0x00, 0x00, 0x00, 0x33, 0xa9, 0x63, 0x6d, 0x74, 0x00, 0x00, 0x00, 0x2b, 0x64, 0x61, 0x74, 0x61, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x50, 0x61, 0x74, 0x63, 0x68, 0x65, 0x64, 0x20, 0x62, 0x79, 0x20, 0x43, 0x6f, 0x6d, 0x70, 0x72, 0x65, 0x73, 0x73, 0x62, 0x61, 0x73, 0x65, 0x2e, 0x63, 0x6f, 0x6d, 0x00, 0x00, 0x00, 0x79, 0x6d, 0x65, 0x74, 0x61, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x21, 0x68, 0x64, 0x6c, 0x72, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6d, 0x64, 0x69, 0x72, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x11, 0x6e, 0x61, 0x6d, 0x65, 0x2e, 0x67, 0x67, 0x2f, 0x6d, 0x61, 0x73, 0x6b, 0x61, 0x00, 0x00, 0x00, 0x3b, 0x69, 0x6c, 0x73, 0x74, 0x00, 0x00, 0x00, 0x33, 0xa9, 0x63, 0x6d, 0x74, 0x00, 0x00, 0x00, 0x2b, 0x64, 0x61, 0x74, 0x61, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x50, 0x61, 0x74, 0x63, 0x68, 0x65, 0x64, 0x20, 0x62, 0x79, 0x20, 0x43, 0x6f, 0x6d, 0x70, 0x72, 0x65, 0x73, 0x73, 0x62, 0x61, 0x73, 0x65, 0x2e, 0x63, 0x6f, 0x6d]);
+ let moovOff=-1,moovSz=0,mvhdOff=-1,mvhdVer=0,movieTs=0,vidTs=0,vidDur=0;
  let trackIdx=0, t2Stco=[], t3StcoOff=-1, t3StcoCount=0, is64=false;
+ let udtaOff=-1, udtaSz=0;
+ let stcoOffsets=[];
  function scan(s,e,depth,inVid){
   if(depth>8)return;
   let i=s;
   while(i+8<=e){
    const sz=r32(i);if(sz<8||i+sz>e)break;
    const t=String.fromCharCode(buf[i+4],buf[i+5],buf[i+6],buf[i+7]);
+   if(t==='moov'){moovOff=i;moovSz=sz;}
    if(t==='mvhd'){mvhdVer=buf[i+8];mvhdOff=i+8;movieTs=mvhdVer===0?r32(i+20):r32(i+28);}
+   if(t==='udta'&&depth===1){udtaOff=i;udtaSz=sz;}
    if(t==='trak'){
     trackIdx++;
     const sl=buf.subarray(i+8,i+sz);let v=false;
@@ -136,6 +141,7 @@ function patchMovieDuration(buf){
    }
    if(t==='stco'||t==='co64'){
     const count=r32(i+12);
+    stcoOffsets.push({off:i, count, is64:t==='co64'});
     if(trackIdx===2){
      for(let j=0;j<count;j++) t2Stco.push(t==='stco'?r32(i+16+j*4):Number(view.getBigUint64(i+16+j*8)));
     }else if(trackIdx===3){
@@ -148,28 +154,56 @@ function patchMovieDuration(buf){
  }
  scan(0,buf.length,0,false);
  
+ const delta = (udtaOff>=0) ? (cbUdta.length - udtaSz) : 0;
+ const newFileLen = buf.length + delta + 65536;
+ const finalBuf = new Uint8Array(newFileLen);
+ const newView = new DataView(finalBuf.buffer);
+ 
+ if(udtaOff>=0){
+  finalBuf.set(buf.subarray(0, udtaOff), 0);
+  finalBuf.set(cbUdta, udtaOff);
+  finalBuf.set(buf.subarray(udtaOff+udtaSz), udtaOff+cbUdta.length);
+  // Update moov size
+  newView.setUint32(moovOff, moovSz + delta);
+ } else {
+  finalBuf.set(buf, 0);
+ }
+
+ // Shift all chunk offsets by delta because mdat moved
+ if(delta!==0){
+  for(const st of stcoOffsets){
+   for(let j=0;j<st.count;j++){
+    if(st.is64){
+     const val=Number(newView.getBigUint64(st.off+16+j*8)) + delta;
+     newView.setBigUint64(st.off+16+j*8, BigInt(val));
+    } else {
+     const val=newView.getUint32(st.off+16+j*4) + delta;
+     newView.setUint32(st.off+16+j*4, val);
+    }
+   }
+  }
+ }
+
  // Patch 1: Clamping movie duration
  if(mvhdOff>=0&&movieTs&&vidTs&&vidDur){
   const correctDur=Math.ceil(vidDur/vidTs*movieTs);
-  if(mvhdVer===0)view.setUint32(mvhdOff+16,correctDur);
-  else{view.setUint32(mvhdOff+24,0);view.setUint32(mvhdOff+28,correctDur);}
+  if(mvhdVer===0)newView.setUint32(mvhdOff+16,correctDur);
+  else{newView.setUint32(mvhdOff+24,0);newView.setUint32(mvhdOff+28,correctDur);}
  }
 
  // Patch 2: Corrupt Track 3 chunk offsets to point to Track 2 (crashes TikTok AAC decoder)
  if(t3StcoOff>=0 && t2Stco.length>0){
   for(let j=0;j<t3StcoCount;j++){
-   // First 899 chunks point to Track 2's valid audio data.
-   // The final chunk points to the end of the file where we append 64KB of zeroes.
-   // This monotonic offset ensures the parser reads it and crashes the AAC decoder.
-   const val=(j < t2Stco.length) ? t2Stco[j] : buf.length;
-   if(is64) view.setBigUint64(t3StcoOff+16+j*8, BigInt(val));
-   else view.setUint32(t3StcoOff+16+j*4, val);
+   // First 899 chunks point to Track 2's valid audio data (shifted by delta).
+   // The final chunk points to the appended garbage block.
+   const val=(j < t2Stco.length) ? (t2Stco[j] + delta) : (buf.length + delta);
+   if(is64) newView.setBigUint64(t3StcoOff+16+j*8, BigInt(val));
+   else newView.setUint32(t3StcoOff+16+j*4, val);
   }
  }
- // Append 64KB of garbage data (exactly matching CompressBase's crash pattern: 00 00 00 04 00 00 00 00)
- const finalBuf = new Uint8Array(buf.length + 65536);
- finalBuf.set(new Uint8Array(buf));
- for(let i=buf.length; i<finalBuf.length; i+=8) finalBuf[i+3]=4;
+
+ // Append 64KB of garbage data (matching CompressBase's crash pattern: 00 00 00 04 ...)
+ for(let i=buf.length+delta; i<newFileLen; i+=8) finalBuf[i+3]=4;
  return finalBuf;
 }
 async function runMaxQualityFps(input,output){
