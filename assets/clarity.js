@@ -154,17 +154,35 @@ function patchMovieDuration(buf){
  }
  scan(0,buf.length,0,false);
  
- const delta = (udtaOff>=0) ? (cbUdta.length - udtaSz) : 0;
+ // Calculate delta: if udta exists, replace it; if not, INSERT at end of moov
+ let insertOff, delta;
+ if(udtaOff>=0){
+  insertOff = udtaOff;
+  delta = cbUdta.length - udtaSz;
+ } else if(moovOff>=0){
+  // No udta exists — insert cbUdta at end of moov (before mdat)
+  insertOff = moovOff + moovSz;
+  delta = cbUdta.length;
+ } else {
+  insertOff = -1;
+  delta = 0;
+ }
  const newFileLen = buf.length + delta + 65536;
  const finalBuf = new Uint8Array(newFileLen);
  const newView = new DataView(finalBuf.buffer);
  
- if(udtaOff>=0){
+ if(insertOff>=0 && udtaOff>=0){
+  // Replace existing udta
   finalBuf.set(buf.subarray(0, udtaOff), 0);
   finalBuf.set(cbUdta, udtaOff);
   finalBuf.set(buf.subarray(udtaOff+udtaSz), udtaOff+cbUdta.length);
-  // Update moov size
   newView.setUint32(moovOff, moovSz + delta);
+ } else if(insertOff>=0 && udtaOff<0){
+  // No existing udta — insert cbUdta at end of moov, push mdat forward
+  finalBuf.set(buf.subarray(0, insertOff), 0);
+  finalBuf.set(cbUdta, insertOff);
+  finalBuf.set(buf.subarray(insertOff), insertOff + cbUdta.length);
+  newView.setUint32(moovOff, moovSz + cbUdta.length);
  } else {
   finalBuf.set(buf, 0);
  }
@@ -222,7 +240,7 @@ async function runMaxQualityFps(input,output){
  const mainAac='rvl-main.aac',patchAac='rvl-fps-patch.aac';
  let patchApplied=false;
  try{
-  const extractCode=await ffmpeg.exec(['-i',input,'-map','0:a:0','-c:a','copy','-f','adts',mainAac]);
+  const extractCode=await ffmpeg.exec(['-i',input,'-map','0:a:0','-c:a','aac','-b:a','256k','-ar','48000','-f','adts',mainAac]);
   if(typeof extractCode==='number'&&extractCode!==0)throw new Error('Primary AAC track unavailable');
   const raw=await ffmpeg.readFile(mainAac);
   const mainAudio=raw instanceof Uint8Array?raw:new Uint8Array(raw);
@@ -233,7 +251,7 @@ async function runMaxQualityFps(input,output){
   const videoSetts="setts=pts='PTS-STARTDTS':dts='DTS-STARTDTS'";
   const mainAudioSetts="setts=pts='PTS-STARTPTS':dts='DTS-STARTPTS'";
   const patchSetts=`setts=pts='if(lt(N,${n}),N*1024,${end}+(N-${n}))':dts='if(lt(N,${n}),N*1024,${end}+(N-${n}))':duration='if(lt(N,${n}),1024,1)':time_base=1/${info.sampleRate}`;
-  const cmd=['-i',input,'-f','aac','-i',patchAac,'-map','0:v:0','-map','0:a:0?','-map','1:a:0','-c','copy','-use_editlist','0','-bsf:v',videoSetts,'-bsf:a:0',mainAudioSetts,'-bsf:a:1',patchSetts,'-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-brand','isom','-metadata','comment=Patched by Compressbase.com;Patched by Compressbase.com',output];
+  const cmd=['-i',input,'-f','aac','-i',patchAac,'-map','0:v:0','-map','0:a:0?','-map','1:a:0','-c:v','copy','-c:a','aac','-b:a','256k','-ar','48000','-use_editlist','0','-bsf:v',videoSetts,'-bsf:a:0',mainAudioSetts,'-bsf:a:1',patchSetts,'-map_metadata','-1','-map_chapters','-1','-fflags','+bitexact','-movflags','+faststart','-brand','isom',output];
   await execChecked(cmd);
   // Post-process: patch mvhd duration to match video track (patch audio stays long)
   const rawOut=await ffmpeg.readFile(output);
