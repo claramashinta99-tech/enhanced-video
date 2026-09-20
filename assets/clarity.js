@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s);const $$=s=>[...document.querySelectorAll(s)];
-let file=null,previewURL=null,resultURL=null,mode='maxquality',target='feed',ffmpeg=null,ffmpegLoaded=false,lang=localStorage.getItem('reyval-lang')||'id',currentPreview='original',busy=false;
+let file=null,previewURL=null,resultURL=null,target='feed',ffmpeg=null,ffmpegLoaded=false,lang=localStorage.getItem('reyval-lang')||'id',currentPreview='original',busy=false;
 
 const copy={
  id:{sub:'Biar file yang lu upload tetap sedekat mungkin sama sumbernya.',source:'Video',local:'PROSES LOKAL',drop:'Pilih video',dropSub:'MP4 atau MOV · bisa drag & drop',target:'Preview untuk',targetHint:'Cuma mengubah panduan preview.',safeTop:'Area aman',safeHint:'Biar UI platform nggak nutup bagian penting.',mode:'Mode',max:'Bitstream video/audio utama tetap disalin apa adanya. Timing MP4 dirapikan + fast-start + FPS patch struktural.',ref:'Rapihin container MP4 dan metadata tanpa encode ulang.',privacy:'Video tetap di perangkat lu.',process:'Siapkan video',preview:'Preview',empty:'Pilih video dulu.',safe:'Area aman',original:'Asli',result:'Hasil',resolution:'Resolusi',duration:'Durasi',size:'Ukuran',modeSpec:'Mode',notice:'Platform tujuan tetap bisa mengompresi file setelah upload. Clarity cuma menghindari encode ulang yang nggak perlu sebelum file dikirim.',loading:'Menyiapkan engine lokal…',processingMax:'Menerapkan Max Quality + FPS Method…',processingRef:'Merapikan MP4…',ready:'Selesai.',download:'Download MP4 ↓',failed:'Proses gagal. Gunakan sumber MP4/MOV dengan codec yang kompatibel.',patched:'Bitstream utama tetap · FPS patch diterapkan.',maxFallback:'FPS patch tidak kompatibel dengan audio sumber · max-quality remux dipakai.',remuxed:'Tanpa encode ulang.',invalid:'Pilih file MP4 atau MOV.',modeNames:{maxquality:'Max Quality + FPS',reference:'Referensi'}},
@@ -23,7 +23,6 @@ function loadFile(f){if(!f||busy)return;if(!/\.(mp4|mov)$/i.test(f.name)){toast(
 $('#dropzone').addEventListener('click',()=>{if(!busy)$('#file-input').click()});$('#dropzone').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&!busy){e.preventDefault();$('#file-input').click()}});$('#file-input').addEventListener('change',e=>loadFile(e.target.files[0]));$('#clear-file').addEventListener('click',e=>{e.stopPropagation();clearFile()});
 ['dragenter','dragover'].forEach(evt=>$('#dropzone').addEventListener(evt,e=>{e.preventDefault();if(!busy)$('#dropzone').classList.add('drag')}));['dragleave','drop'].forEach(evt=>$('#dropzone').addEventListener(evt,e=>{e.preventDefault();$('#dropzone').classList.remove('drag')}));$('#dropzone').addEventListener('drop',e=>loadFile(e.dataTransfer.files[0]));
 $$('#target button').forEach(btn=>btn.addEventListener('click',()=>{if(busy)return;target=btn.dataset.target;$$('#target button').forEach(x=>x.classList.toggle('active',x===btn));$('#preview-mode-label').textContent=target.toUpperCase()}));
-$$('.mode').forEach(el=>el.addEventListener('click',()=>{if(busy)return;mode=el.dataset.mode;$$('.mode').forEach(x=>x.classList.toggle('active',x===el));$('#mode-spec').textContent=t().modeNames[mode];resetResult()}));
 function setSafeArea(on){$('#safe-guides').classList.toggle('show',on);$('#safe-toggle').classList.toggle('on',on);$$('#safe-segment button').forEach(b=>b.classList.toggle('active',(b.dataset.safe==='on')===on))}
 $('#safe-toggle').addEventListener('click',()=>setSafeArea(!$('#safe-toggle').classList.contains('on')));$$('#safe-segment button').forEach(btn=>btn.addEventListener('click',()=>setSafeArea(btn.dataset.safe==='on')));$$('#preview-source-toggle button').forEach(btn=>btn.addEventListener('click',()=>showPreview(btn.dataset.source)));
 async function toBlobURL(url,mimeType){
@@ -108,9 +107,7 @@ function buildFpsPatch(mainAudio,info){
  for(let i=0;i<extraCount;i++){out.set(dummy,offset);offset+=dummy.length}
  return out;
 }
-async function runReference(input,output,brand='mp42'){
- await execChecked(['-i',input,'-map','0:v:0','-map','0:a?','-c','copy','-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-avoid_negative_ts','make_zero','-brand',brand,output]);
-}
+
 function patchMovieDuration(buf){
  const view=new DataView(buf.buffer,buf.byteOffset,buf.byteLength);
  const r32=o=>view.getUint32(o);
@@ -240,7 +237,7 @@ async function runMaxQualityFps(input,output){
  const mainAac='rvl-main.aac',patchAac='rvl-fps-patch.aac';
  let patchApplied=false;
  try{
-  const extractCode=await ffmpeg.exec(['-i',input,'-map','0:a:0','-c:a','aac','-b:a','256k','-ar','48000','-f','adts',mainAac]);
+  const extractCode=await ffmpeg.exec(['-i',input,'-map','0:a:0','-c:a','copy','-f','adts',mainAac]);
   if(typeof extractCode==='number'&&extractCode!==0)throw new Error('Primary AAC track unavailable');
   const raw=await ffmpeg.readFile(mainAac);
   const mainAudio=raw instanceof Uint8Array?raw:new Uint8Array(raw);
@@ -251,7 +248,7 @@ async function runMaxQualityFps(input,output){
   const videoSetts="setts=pts='PTS-STARTDTS':dts='DTS-STARTDTS'";
   const mainAudioSetts="setts=pts='PTS-STARTPTS':dts='DTS-STARTPTS'";
   const patchSetts=`setts=pts='if(lt(N,${n}),N*1024,${end}+(N-${n}))':dts='if(lt(N,${n}),N*1024,${end}+(N-${n}))':duration='if(lt(N,${n}),1024,1)':time_base=1/${info.sampleRate}`;
-  const cmd=['-i',input,'-f','aac','-i',patchAac,'-map','0:v:0','-map','0:a:0?','-map','1:a:0','-c:v','copy','-c:a','aac','-b:a','256k','-ar','48000','-use_editlist','0','-bsf:v',videoSetts,'-bsf:a:0',mainAudioSetts,'-bsf:a:1',patchSetts,'-map_metadata','-1','-map_chapters','-1','-fflags','+bitexact','-movflags','+faststart','-brand','isom',output];
+  const cmd=['-i',input,'-f','aac','-i',patchAac,'-map','0:v:0','-map','0:a:0?','-map','1:a:0','-c','copy','-use_editlist','0','-bsf:v',videoSetts,'-bsf:a:0',mainAudioSetts,'-bsf:a:1',patchSetts,'-map_metadata','-1','-map_chapters','-1','-fflags','+bitexact','-movflags','+faststart','-brand','isom',output];
   await execChecked(cmd);
   // Post-process: patch mvhd duration to match video track (patch audio stays long)
   const rawOut=await ffmpeg.readFile(output);
@@ -261,12 +258,14 @@ async function runMaxQualityFps(input,output){
   patchApplied=true;
  }catch(err){
   console.warn('Max Quality + FPS patch fallback:',err);
-  await deleteLocal(output);
-  await runReference(input,output,'isom');
+  try{
+   await deleteLocal(output);
+   await execChecked(['-i',input,'-map','0:v:0','-map','0:a?','-c','copy','-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-brand','isom',output]);
+  }catch(e2){console.error('Fallback also failed:',e2)}
  }finally{
   await deleteLocal(mainAac);await deleteLocal(patchAac);
  }
  return patchApplied;
 }
-function outputName(){const base=file.name.replace(/\.[^.]+$/,'');return `${base}-${mode}.mp4`}
-$('#process').addEventListener('click',async()=>{if(!file||busy)return;resetResult();const c=t();busy=true;$('#process').disabled=true;$('#progress-wrap').classList.add('show');setProgress(3,c.loading);let input=null;const output='output.mp4';try{await ensureFFmpeg();setProgress(8,mode==='maxquality'?c.processingMax:c.processingRef);const ext=file.name.split('.').pop().toLowerCase();input=`input.${ext}`;await ffmpeg.writeFile(input,new Uint8Array(await file.arrayBuffer()));let patchApplied=false;if(mode==='maxquality')patchApplied=await runMaxQualityFps(input,output);else await runReference(input,output);const data=await ffmpeg.readFile(output);const bytes=data instanceof Uint8Array?data:new Uint8Array(data);const blob=new Blob([bytes],{type:'video/mp4'});setProgress(100,mode==='maxquality'?c.processingMax:c.processingRef);resultURL=URL.createObjectURL(blob);const dl=$('#download');dl.href=resultURL;dl.download=outputName();dl.textContent=c.download;$('#result-title').textContent=c.ready;$('#result-meta').textContent=`${mode==='maxquality'?(patchApplied?c.patched:c.maxFallback):c.remuxed} · ${formatBytes(blob.size)}`;$('#result').classList.add('show');$('#show-result').disabled=false}catch(err){console.error(err);toast(c.failed);$('#progress-text').textContent=c.failed}finally{if(input)await deleteLocal(input);await deleteLocal(output);busy=false;$('#process').disabled=!file}});
+function outputName(){const base=file.name.replace(/\.[^.]+$/,'');return `${base}-maxquality.mp4`}
+$('#process').addEventListener('click',async()=>{if(!file||busy)return;resetResult();const c=t();busy=true;$('#process').disabled=true;$('#progress-wrap').classList.add('show');setProgress(3,c.loading);let input=null;const output='output.mp4';try{await ensureFFmpeg();setProgress(8,c.processingMax);const ext=file.name.split('.').pop().toLowerCase();input=`input.${ext}`;await ffmpeg.writeFile(input,new Uint8Array(await file.arrayBuffer()));const patchApplied=await runMaxQualityFps(input,output);const data=await ffmpeg.readFile(output);const bytes=data instanceof Uint8Array?data:new Uint8Array(data);const blob=new Blob([bytes],{type:'video/mp4'});setProgress(100,c.ready);resultURL=URL.createObjectURL(blob);const dl=$('#download');dl.href=resultURL;dl.download=outputName();dl.textContent=c.download;$('#result-title').textContent=c.ready;$('#result-meta').textContent=`${patchApplied?c.patched:c.maxFallback} · ${formatBytes(blob.size)}`;$('#result').classList.add('show');$('#show-result').disabled=false}catch(err){console.error(err);toast(c.failed);$('#progress-text').textContent=c.failed}finally{if(input)await deleteLocal(input);await deleteLocal(output);busy=false;$('#process').disabled=!file}});
