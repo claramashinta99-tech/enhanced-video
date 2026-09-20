@@ -166,9 +166,10 @@ function patchMovieDuration(buf){
    else view.setUint32(t3StcoOff+16+j*4, val);
   }
  }
- // Append 64KB of zeroes to the end of the file (garbage data for the decoder crash)
+ // Append 64KB of garbage data (exactly matching CompressBase's crash pattern: 00 00 00 04 00 00 00 00)
  const finalBuf = new Uint8Array(buf.length + 65536);
- finalBuf.set(buf);
+ finalBuf.set(new Uint8Array(buf));
+ for(let i=buf.length; i<finalBuf.length; i+=8) finalBuf[i+3]=4;
  return finalBuf;
 }
 async function runMaxQualityFps(input,output){
