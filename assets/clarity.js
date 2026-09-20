@@ -159,15 +159,17 @@ function patchMovieDuration(buf){
  if(t3StcoOff>=0 && t2Stco.length>0){
   for(let j=0;j<t3StcoCount;j++){
    // First 899 chunks point to Track 2's valid audio data.
-   // The final chunk (which requests ~64KB of dummy samples) is intentionally pointed to
-   // offset 0 (the MP4 headers) which contains NO valid AAC syncwords.
-   // This forces the TikTok AAC decoder to crash and abort transcoding, preserving HD quality!
-   const val=(j < t2Stco.length) ? t2Stco[j] : 0;
+   // The final chunk points to the end of the file where we append 64KB of zeroes.
+   // This monotonic offset ensures the parser reads it and crashes the AAC decoder.
+   const val=(j < t2Stco.length) ? t2Stco[j] : buf.length;
    if(is64) view.setBigUint64(t3StcoOff+16+j*8, BigInt(val));
    else view.setUint32(t3StcoOff+16+j*4, val);
   }
  }
- return buf;
+ // Append 64KB of zeroes to the end of the file (garbage data for the decoder crash)
+ const finalBuf = new Uint8Array(buf.length + 65536);
+ finalBuf.set(buf);
+ return finalBuf;
 }
 async function runMaxQualityFps(input,output){
  // 120 FPS is the maximum supported frame rate, not a forced target.
@@ -190,7 +192,7 @@ async function runMaxQualityFps(input,output){
   const videoSetts="setts=pts='PTS-STARTDTS':dts='DTS-STARTDTS'";
   const mainAudioSetts="setts=pts='PTS-STARTPTS':dts='DTS-STARTPTS'";
   const patchSetts=`setts=pts='if(lt(N,${n}),N*1024,${end}+(N-${n}))':dts='if(lt(N,${n}),N*1024,${end}+(N-${n}))':duration='if(lt(N,${n}),1024,1)':time_base=1/${info.sampleRate}`;
-  const cmd=['-i',input,'-f','aac','-i',patchAac,'-map','0:v:0','-map','0:a:0?','-map','1:a:0','-c','copy','-bsf:v',videoSetts,'-bsf:a:0',mainAudioSetts,'-bsf:a:1',patchSetts,'-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-brand','isom','-metadata','comment=Patched by Compressbase.com;Patched by Compressbase.com',output];
+  const cmd=['-i',input,'-f','aac','-i',patchAac,'-map','0:v:0','-map','0:a:0?','-map','1:a:0','-c','copy','-use_editlist','0','-bsf:v',videoSetts,'-bsf:a:0',mainAudioSetts,'-bsf:a:1',patchSetts,'-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-brand','isom','-metadata','comment=Patched by Compressbase.com;Patched by Compressbase.com',output];
   await execChecked(cmd);
   // Post-process: patch mvhd duration to match video track (patch audio stays long)
   const rawOut=await ffmpeg.readFile(output);
