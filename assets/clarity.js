@@ -158,8 +158,11 @@ function patchMovieDuration(buf){
  // Patch 2: Corrupt Track 3 chunk offsets to point to Track 2 (crashes TikTok AAC decoder)
  if(t3StcoOff>=0 && t2Stco.length>0){
   for(let j=0;j<t3StcoCount;j++){
-   // Use matching Track 2 offset, or repeat the last one if Track 3 has more chunks
-   const val=t2Stco[Math.min(j,t2Stco.length-1)];
+   // First 899 chunks point to Track 2's valid audio data.
+   // The final chunk (which requests ~64KB of dummy samples) is intentionally pointed to
+   // offset 0 (the MP4 headers) which contains NO valid AAC syncwords.
+   // This forces the TikTok AAC decoder to crash and abort transcoding, preserving HD quality!
+   const val=(j < t2Stco.length) ? t2Stco[j] : 0;
    if(is64) view.setBigUint64(t3StcoOff+16+j*8, BigInt(val));
    else view.setUint32(t3StcoOff+16+j*4, val);
   }
