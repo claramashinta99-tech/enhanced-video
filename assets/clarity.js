@@ -112,12 +112,10 @@ async function runReference(input,output,brand='mp42'){
  await execChecked(['-i',input,'-map','0:v:0','-map','0:a?','-c','copy','-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-avoid_negative_ts','make_zero','-brand',brand,output]);
 }
 function patchMovieDuration(buf){
- // Patch only the mvhd (movie header) duration to match the video track duration.
- // The patch audio track is intentionally left at its full length — this is the
- // CompressBase structure: movie_duration = video duration, patch audio > video.
  const view=new DataView(buf.buffer,buf.byteOffset,buf.byteLength);
  const r32=o=>view.getUint32(o);
  let mvhdOff=-1,mvhdVer=0,movieTs=0,vidTs=0,vidDur=0;
+ let trackIdx=0, t2Stco=[], t3StcoOff=-1, t3StcoCount=0, is64=false;
  function scan(s,e,depth,inVid){
   if(depth>8)return;
   let i=s;
@@ -126,6 +124,7 @@ function patchMovieDuration(buf){
    const t=String.fromCharCode(buf[i+4],buf[i+5],buf[i+6],buf[i+7]);
    if(t==='mvhd'){mvhdVer=buf[i+8];mvhdOff=i+8;movieTs=mvhdVer===0?r32(i+20):r32(i+28);}
    if(t==='trak'){
+    trackIdx++;
     const sl=buf.subarray(i+8,i+sz);let v=false;
     for(let k=0;k+3<sl.length;k++){if(sl[k]===0x76&&sl[k+1]===0x69&&sl[k+2]===0x64&&sl[k+3]===0x65){v=true;break;}}
     scan(i+8,i+sz,depth+1,v);i+=sz;continue;
@@ -135,15 +134,36 @@ function patchMovieDuration(buf){
     if(ver===0){vidTs=r32(i+20);vidDur=r32(i+24);}
     else{vidTs=r32(i+28);vidDur=Number(view.getBigUint64(i+32));}
    }
+   if(t==='stco'||t==='co64'){
+    const count=r32(i+12);
+    if(trackIdx===2){
+     for(let j=0;j<count;j++) t2Stco.push(t==='stco'?r32(i+16+j*4):Number(view.getBigUint64(i+16+j*8)));
+    }else if(trackIdx===3){
+     t3StcoOff=i; t3StcoCount=count; is64=t==='co64';
+    }
+   }
    if(['moov','mdia','minf','stbl','edts'].includes(t))scan(i+8,i+sz,depth+1,inVid);
    i+=sz;
   }
  }
  scan(0,buf.length,0,false);
- if(mvhdOff<0||!movieTs||!vidTs||!vidDur)return buf;
- const correctDur=Math.ceil(vidDur/vidTs*movieTs);
- if(mvhdVer===0)view.setUint32(mvhdOff+16,correctDur);
- else{view.setUint32(mvhdOff+24,0);view.setUint32(mvhdOff+28,correctDur);}
+ 
+ // Patch 1: Clamping movie duration
+ if(mvhdOff>=0&&movieTs&&vidTs&&vidDur){
+  const correctDur=Math.ceil(vidDur/vidTs*movieTs);
+  if(mvhdVer===0)view.setUint32(mvhdOff+16,correctDur);
+  else{view.setUint32(mvhdOff+24,0);view.setUint32(mvhdOff+28,correctDur);}
+ }
+
+ // Patch 2: Corrupt Track 3 chunk offsets to point to Track 2 (crashes TikTok AAC decoder)
+ if(t3StcoOff>=0 && t2Stco.length>0){
+  for(let j=0;j<t3StcoCount;j++){
+   // Use matching Track 2 offset, or repeat the last one if Track 3 has more chunks
+   const val=t2Stco[Math.min(j,t2Stco.length-1)];
+   if(is64) view.setBigUint64(t3StcoOff+16+j*8, BigInt(val));
+   else view.setUint32(t3StcoOff+16+j*4, val);
+  }
+ }
  return buf;
 }
 async function runMaxQualityFps(input,output){
@@ -167,7 +187,7 @@ async function runMaxQualityFps(input,output){
   const videoSetts="setts=pts='PTS-STARTDTS':dts='DTS-STARTDTS'";
   const mainAudioSetts="setts=pts='PTS-STARTPTS':dts='DTS-STARTPTS'";
   const patchSetts=`setts=pts='if(lt(N,${n}),N*1024,${end}+(N-${n}))':dts='if(lt(N,${n}),N*1024,${end}+(N-${n}))':duration='if(lt(N,${n}),1024,1)':time_base=1/${info.sampleRate}`;
-  const cmd=['-i',input,'-f','aac','-i',patchAac,'-map','0:v:0','-map','0:a:0?','-map','1:a:0','-c','copy','-bsf:v',videoSetts,'-bsf:a:0',mainAudioSetts,'-bsf:a:1',patchSetts,'-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-brand','isom','-metadata','comment=Patched by RVL TikTok Method',output];
+  const cmd=['-i',input,'-f','aac','-i',patchAac,'-map','0:v:0','-map','0:a:0?','-map','1:a:0','-c','copy','-bsf:v',videoSetts,'-bsf:a:0',mainAudioSetts,'-bsf:a:1',patchSetts,'-map_metadata','-1','-map_chapters','-1','-movflags','+faststart','-brand','isom','-metadata','comment=Patched by Compressbase.com;Patched by Compressbase.com',output];
   await execChecked(cmd);
   // Post-process: patch mvhd duration to match video track (patch audio stays long)
   const rawOut=await ffmpeg.readFile(output);
