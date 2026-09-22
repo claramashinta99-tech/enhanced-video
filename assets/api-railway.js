@@ -4,16 +4,12 @@
   const RENDER='https://rvl-api.onrender.com';
   const RAILWAY='https://enhanced-video-production.up.railway.app';
   const platform=()=>document.body?.dataset?.platform||'';
-  const isYouTubePage=()=>platform().startsWith('youtube');
   const rewrite=value=>{
     try{
       const s=String(value||'');
-      // YouTube Video / Shorts / MP3 use authenticated Render while
-      // Railway's public YouTube egress is blocked by YouTube.
-      if(isYouTubePage())return s.startsWith(RAILWAY)?RENDER+s.slice(RAILWAY.length):s;
       // Universal chooses its backend per detected link.
       if(platform()==='universal')return s;
-      // Everything else stays on Railway exactly as before.
+      // Route everything through the fast 24/7 Railway backend (with POT provider & 4K support)
       return s.startsWith(RENDER)?RAILWAY+s.slice(RENDER.length):s;
     }catch{return value}
   };

@@ -113,8 +113,8 @@ def youtube_attempts():
         {'name':'safari-cookie','clients':['default','web_safari'],'cookie':True},
         {'name':'mweb-public','clients':['mweb'],'cookie':False},
         {'name':'embedded-public','clients':['web_embedded'],'cookie':False},
-        {'name':'android-vr','clients':['android_vr'],'cookie':False,'selector':'best/18'}]
-    return [{'name':'mweb-public','clients':['mweb'],'cookie':False},{'name':'embedded-public','clients':['web_embedded'],'cookie':False},{'name':'android-vr','clients':['android_vr'],'cookie':False,'selector':'best/18'}]
+        {'name':'android-vr','clients':['android_vr'],'cookie':False}]
+    return [{'name':'mweb-public','clients':['mweb'],'cookie':False},{'name':'embedded-public','clients':['web_embedded'],'cookie':False},{'name':'android-vr','clients':['android_vr'],'cookie':False}]
 
 def extract_info_sync(url):
     cached=cache_get(url)
@@ -140,8 +140,11 @@ def exact_format_parts(info,target):
         if not isinstance(f,dict) or not f.get('format_id'):continue
         try:h=int(f.get('height') or 0)
         except (TypeError,ValueError):h=0
+        try:w=int(f.get('width') or 0)
+        except (TypeError,ValueError):w=0
         v=f.get('vcodec');a=f.get('acodec')
-        if h==target and v and v!='none':videos.append(f)
+        is_match=(h==target or w==target or (h>0 and w>0 and min(h,w)==target))
+        if is_match and v and v!='none':videos.append(f)
         if (not v or v=='none') and a and a!='none':audios.append(f)
     if not videos:return None,None
     def vrank(f):
@@ -185,7 +188,13 @@ def available_heights(info):
     for f in info.get('formats') or []:
         try:h=int(f.get('height') or 0)
         except (TypeError,ValueError):h=0
-        if h and f.get('vcodec')!='none':hs.add(h)
+        try:w=int(f.get('width') or 0)
+        except (TypeError,ValueError):w=0
+        v=f.get('vcodec')
+        if v and v!='none':
+            if h:hs.add(h)
+            if w:hs.add(w)
+            if h>0 and w>0:hs.add(min(h,w))
     return hs
 
 def max_height(info):return max(available_heights(info),default=0)
@@ -256,8 +265,9 @@ def probe_dimensions(path):
 def verify_file_quality(path,quality):
     if quality not in EXACT_QUALITIES:return
     wanted=EXACT_QUALITIES[quality];w,h=probe_dimensions(path)
-    if not h:raise RuntimeError('ffprobe could not verify output resolution')
-    if h!=wanted:raise RuntimeError(f'output resolution mismatch wanted={wanted} got={w}x{h}')
+    if not h and not w:raise RuntimeError('ffprobe could not verify output resolution')
+    if h!=wanted and w!=wanted and (not (h>0 and w>0) or min(w,h)!=wanted):
+        raise RuntimeError(f'output resolution mismatch wanted={wanted} got={w}x{h}')
 
 def add_quality_suffix(path,quality):
     if quality not in EXACT_QUALITIES:return path
@@ -295,9 +305,9 @@ def download_sync(url,quality,w,job_id=None):
 def cleanup(path):shutil.rmtree(path,ignore_errors=True)
 def youtube_error(exc):
     c=youtube_cookie_status();m=str(exc).lower()
-    if not c['exists']:return 'Cookie YouTube belum kebaca di Render.'
-    if not c['valid']:return 'Cookie YouTube tidak valid.'
-    if 'sign in' in m or 'not a bot' in m:return 'YouTube menolak sesi server. Cookie perlu diperbarui.'
+    if 'format' in m and 'not present' in m:return 'Resolusi yang dipilih tidak tersedia untuk video ini.'
+    if 'sign in' in m or 'not a bot' in m or 'confirm you' in m:return 'YouTube menolak sesi server. Sesi perlu diperbarui.'
+    if not c['exists'] and not c['valid']:return 'YouTube gagal menyiapkan file (sesi server tidak tersedia).'
     return 'YouTube gagal menyiapkan file atau resolusi asli tidak tersedia dari sesi server.'
 
 def purge_jobs():

@@ -44,7 +44,7 @@ def youtube_attempts():
         {'name': 'mweb-pot-public', 'clients': ['mweb'], 'cookie': False},
         {'name': 'default-public', 'clients': ['default'], 'cookie': False},
         {'name': 'embedded-public', 'clients': ['web_embedded'], 'cookie': False},
-        {'name': 'android-vr-public', 'clients': ['android_vr'], 'cookie': False, 'selector': 'best/18'},
+        {'name': 'android-vr-public', 'clients': ['android_vr'], 'cookie': False},
     ]
     if legacy.youtube_cookie_ready():
         attempts.extend([
