@@ -16,7 +16,7 @@ function setLang(lang){localStorage.setItem('reyval-lang',lang);document.documen
 function installSiteBgm(){
   if(document.querySelector('#rvl-site-bgm'))return;
   const audio=document.createElement('audio');
-  audio.id='rvl-site-bgm';audio.src='/assets/site-bgm.mp3';audio.preload='auto';audio.loop=true;audio.volume=.16;
+  audio.id='rvl-site-bgm';audio.src='/assets/site-bgm.mp3';audio.preload='none';audio.loop=true;audio.volume=.16;
   document.body.appendChild(audio);
   const style=document.createElement('style');
   style.textContent='.music-toggle{width:34px;height:34px;border:1px solid var(--line,#292929);border-radius:999px;background:#0e0e0e;color:#f2f2f2;display:grid;place-items:center;cursor:pointer;font-size:14px;line-height:1;transition:.18s ease}.music-toggle:hover{background:#171717;border-color:#444}.music-toggle.off{color:#666}.music-toggle .bars{display:flex;align-items:end;gap:2px;height:12px}.music-toggle .bars i{display:block;width:2px;background:currentColor;border-radius:2px;animation:rvlEq .8s ease-in-out infinite alternate}.music-toggle .bars i:nth-child(1){height:5px;animation-delay:-.4s}.music-toggle .bars i:nth-child(2){height:11px;animation-delay:-.15s}.music-toggle .bars i:nth-child(3){height:7px;animation-delay:-.55s}.music-toggle.off .bars i{animation:none;height:2px}@keyframes rvlEq{from{transform:scaleY(.45)}to{transform:scaleY(1)}}';
