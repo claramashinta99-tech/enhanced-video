@@ -52,7 +52,27 @@
     }catch(e){if(e.name==='AbortError'||run!==inspectRun)return;console.error(e);resetMediaCard();setStatus(e.message||text('Gagal mengecek link.','Failed to check link.'),'error')}finally{if(run===inspectRun){inspectBtn.disabled=false;input.disabled=false;inspectController=null}}
   }
 
-  async function pollJob(jobId,run){while(run===downloadRun){await sleep(650);const r=await fetch(`${RVL_API}/api/jobs/${encodeURIComponent(jobId)}?_=${Date.now()}`,{cache:'no-store'});const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok)throw new Error(data.detail||text('Proses download gagal.','Download process failed.'));setProgress(data.progress||0,data.stage||text('Menyiapkan','Preparing'));if(data.state==='ready'){setProgress(100,text('Selesai','Done'));frame.src=`${RVL_API}/api/jobs/${encodeURIComponent(jobId)}/file?_=${Date.now()}`;downloadBtn.disabled=false;quality.disabled=false;downloadBtn.textContent='Download';setTimeout(()=>{if(run===downloadRun)hideProgress()},2600);return}if(data.state==='error')throw new Error(data.error||text('Download gagal.','Download failed.'))}}
+  async function pollJob(jobId,run){
+    while(run===downloadRun){
+      await sleep(650);
+      const r=await fetch(`${RVL_API}/api/jobs/${encodeURIComponent(jobId)}?_=${Date.now()}`,{cache:'no-store'});
+      const data=await r.json().catch(()=>({}));
+      if(run!==downloadRun)return;
+      if(!r.ok)throw new Error(data.detail||text('Proses download gagal.','Download process failed.'));
+      setProgress(data.progress||0,data.stage||text('Menyiapkan','Preparing'));
+      if(data.state==='ready'){
+        setProgress(100,text('Selesai','Done'));
+        const fileUrl=`${RVL_API}/api/jobs/${encodeURIComponent(jobId)}/file?_=${Date.now()}`;
+        frame.src=fileUrl;
+        try{const a=document.createElement('a');a.href=fileUrl;if(data.filename)a.download=data.filename;a.rel='noopener noreferrer';document.body.appendChild(a);a.click();setTimeout(()=>a.remove(),1000)}catch{}
+        downloadBtn.disabled=false;quality.disabled=false;downloadBtn.textContent='Download';
+        setTimeout(()=>{if(run===downloadRun)hideProgress()},2600);
+        return;
+      }
+      if(data.state==='error')throw new Error(data.error||text('Download gagal.','Download failed.'));
+    }
+  }
   async function download(){if(!current)return;const run=++downloadRun;const selected=quality.value;setStatus('');downloadBtn.disabled=true;quality.disabled=true;downloadBtn.textContent=text('Proses…','Processing…');setProgress(3,text('Mulai proses','Starting'));try{const r=await fetch(`${RVL_API}/api/jobs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url,quality:selected}),cache:'no-store'});const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok||!data.job_id)throw new Error(data.detail||text('Gagal memulai proses.','Could not start processing.'));setProgress(data.progress||3,text('Antrean','Queued'));await pollJob(data.job_id,run)}catch(e){if(run!==downloadRun)return;console.error(e);hideProgress();setStatus(e.message||text('Download gagal.','Download failed.'),'error');downloadBtn.disabled=false;quality.disabled=false;downloadBtn.textContent='Download'}}
   inspectBtn.addEventListener('click',inspect);downloadBtn.addEventListener('click',download);input.addEventListener('keydown',e=>{if(e.key==='Enter')inspect()});input.addEventListener('input',()=>{if(current&&input.value.trim()!==current.url){++inspectRun;++downloadRun;if(inspectController)inspectController.abort();resetMediaCard();setStatus('')}});window.addEventListener('reyval:lang',applyStaticCopy);applyStaticCopy();
+  const initial=new URLSearchParams(location.search).get('url');if(initial){input.value=initial;setTimeout(inspect,0)}
 })();

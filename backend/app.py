@@ -319,9 +319,9 @@ def cleanup(path):shutil.rmtree(path,ignore_errors=True)
 def youtube_error(exc):
     c=youtube_cookie_status();m=str(exc).lower()
     if 'format' in m and 'not present' in m:return 'Resolusi yang dipilih tidak tersedia untuk video ini.'
-    if 'sign in' in m or 'not a bot' in m or 'confirm you' in m:return 'YouTube menolak sesi server. Sesi perlu diperbarui.'
-    if not c['exists'] and not c['valid']:return 'YouTube gagal menyiapkan file (sesi server tidak tersedia).'
-    return 'YouTube gagal menyiapkan file atau resolusi asli tidak tersedia dari sesi server.'
+    if 'unavailable' in m or 'not available' in m or 'private' in m or 'deleted' in m:return 'Video YouTube tidak tersedia atau bersifat privat.'
+    if 'sign in' in m or 'not a bot' in m or 'confirm you' in m:return 'YouTube meminta verifikasi sesi atau bot.'
+    return 'Gagal menyiapkan file YouTube. Pastikan link publik dan coba lagi.'
 
 def purge_jobs():
     cutoff=time.time()-JOB_TTL;stale=[]

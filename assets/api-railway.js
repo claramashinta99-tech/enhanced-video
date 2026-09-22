@@ -7,8 +7,6 @@
   const rewrite=value=>{
     try{
       const s=String(value||'');
-      // Universal chooses its backend per detected link.
-      if(platform()==='universal')return s;
       // Route everything through the fast 24/7 Railway backend (with POT provider & 4K support)
       return s.startsWith(RENDER)?RAILWAY+s.slice(RENDER.length):s;
     }catch{return value}

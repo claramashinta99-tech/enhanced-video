@@ -43,7 +43,15 @@
       await sleep(650);
       const r=await fetch(`${API}/api/jobs/${encodeURIComponent(job)}?_=${Date.now()}`,{cache:'no-store'});const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok)throw new Error(data.detail||t('Proses MP3 gagal.','MP3 process failed.'));
       setProgress(data.progress||0,guessStage(data.progress||0));
-      if(data.state==='ready'){setProgress(100,t('Sip, beres!','Done!'));frame.src=`${API}/api/jobs/${encodeURIComponent(job)}/file?_=${Date.now()}`;downloadBtn.disabled=false;setTimeout(()=>{if(run===downloadRun)hideProgress()},1600);return}
+      if(data.state==='ready'){
+        setProgress(100,t('Sip, beres!','Done!'));
+        const fileUrl=`${API}/api/jobs/${encodeURIComponent(job)}/file?_=${Date.now()}`;
+        frame.src=fileUrl;
+        try{const a=document.createElement('a');a.href=fileUrl;if(data.filename)a.download=data.filename;a.rel='noopener noreferrer';document.body.appendChild(a);a.click();setTimeout(()=>a.remove(),1000)}catch{}
+        downloadBtn.disabled=false;
+        setTimeout(()=>{if(run===downloadRun)hideProgress()},1600);
+        return;
+      }
       if(data.state==='error')throw new Error(data.error||t('Proses MP3 gagal.','MP3 process failed.'));
     }
   }
@@ -53,7 +61,11 @@
       if(mode.value==='fast'){
         setProgress(15,t('Lagi ngambil audionya…','Getting the audio…'),true);
         const r=await fetch(`${API}/api/audio/prepare`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url}),cache:'no-store'});const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok||!data.token)throw new Error(data.detail||t('Audio gagal disiapkan.','Could not prepare audio.'));
-        setProgress(100,t('Sip, mulai didownload…','Nice, download starting…'));frame.src=`${API}/api/audio/chunked/${encodeURIComponent(data.token)}?_=${Date.now()}`;setTimeout(()=>{if(run===downloadRun)hideProgress()},1200);
+        setProgress(100,t('Sip, mulai didownload…','Nice, download starting…'));
+        const fileUrl=`${API}/api/audio/chunked/${encodeURIComponent(data.token)}?_=${Date.now()}`;
+        frame.src=fileUrl;
+        try{const a=document.createElement('a');a.href=fileUrl;a.rel='noopener noreferrer';document.body.appendChild(a);a.click();setTimeout(()=>a.remove(),1000)}catch{}
+        setTimeout(()=>{if(run===downloadRun)hideProgress()},1200);
       }else{
         setProgress(5,guessStage(5));
         const r=await fetch(`${API}/api/jobs`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:current.url,quality:'audio'}),cache:'no-store'});const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok||!data.job_id)throw new Error(data.detail||t('Gagal memulai MP3.','Could not start MP3 processing.'));
@@ -64,4 +76,5 @@
   }
   function applyCopy(){const en=lang()==='en';const sub=$('#page-sub');if(sub)sub.textContent=en?'Paste a YouTube link, check the audio, then choose Original Audio or MP3 192 kbps.':'Tempel link YouTube, cek audionya, lalu pilih Audio Asli atau MP3 192 kbps.';input.placeholder=en?'Paste YouTube link':'Tempel link YouTube';inspectBtn.textContent=en?'Check':'Cek';const f=mode.querySelector('option[value="fast"]'),m=mode.querySelector('option[value="mp3"]');if(f)f.textContent=en?'Original Audio':'Audio Asli';if(m)m.textContent='MP3 · 192 kbps';updateMode()}
   inspectBtn.addEventListener('click',inspect);downloadBtn.addEventListener('click',download);mode.addEventListener('change',updateMode);input.addEventListener('keydown',e=>{if(e.key==='Enter')inspect()});input.addEventListener('input',()=>{if(current&&input.value.trim()!==current.url){++inspectRun;++downloadRun;inspectController?.abort();reset();setStatus('')}});window.addEventListener('reyval:lang',applyCopy);applyCopy();
+  const initial=new URLSearchParams(location.search).get('url');if(initial){input.value=initial;setTimeout(inspect,0)}
 })();

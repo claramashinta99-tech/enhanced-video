@@ -3,8 +3,7 @@
   const input=qs('#media-url'),inspectBtn=qs('#inspect-btn'),card=qs('#media-card'),statusEl=qs('#download-status'),thumb=qs('#media-thumb'),titleEl=qs('#media-title'),metaEl=qs('#media-meta'),quality=qs('#quality'),downloadBtn=qs('#download-btn'),detected=qs('#detected-platform');
   if(!input||!inspectBtn||!card||!statusEl||!quality||!downloadBtn)return;
   const RAILWAY='https://enhanced-video-production.up.railway.app';
-  const RENDER='https://rvl-api.onrender.com';
-  const apiFor=kind=>kind?.platform==='youtube'?RENDER:RAILWAY;
+  const apiFor=()=>RAILWAY;
   let current=null,inspectRun=0,inspectController=null,downloadRun=0;
 
   if(!document.querySelector('#rvl-universal-style')){
@@ -97,7 +96,15 @@
     while(run===downloadRun){
       await sleep(650);const r=await fetch(`${api}${base}/${encodeURIComponent(jobId)}?_=${Date.now()}`,{cache:'no-store'});const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok)throw new Error(data.detail||text('Proses download gagal.','Download failed.'));
       setProgress(data.progress||0,data.stage||text('Menyiapkan','Preparing'));
-      if(data.state==='ready'){setProgress(100,text('Selesai','Done'));frame.src=`${api}${base}/${encodeURIComponent(jobId)}/file?_=${Date.now()}`;downloadBtn.disabled=false;quality.disabled=false;downloadBtn.textContent='Download';setTimeout(()=>{if(run===downloadRun)hideProgress()},2400);return}
+      if(data.state==='ready'){
+        setProgress(100,text('Selesai','Done'));
+        const fileUrl=`${api}${base}/${encodeURIComponent(jobId)}/file?_=${Date.now()}`;
+        frame.src=fileUrl;
+        try{const a=document.createElement('a');a.href=fileUrl;if(data.filename)a.download=data.filename;a.rel='noopener noreferrer';document.body.appendChild(a);a.click();setTimeout(()=>a.remove(),1000)}catch{}
+        downloadBtn.disabled=false;quality.disabled=false;downloadBtn.textContent='Download';
+        setTimeout(()=>{if(run===downloadRun)hideProgress()},2400);
+        return;
+      }
       if(data.state==='error')throw new Error(data.error||text('Download gagal.','Download failed.'));
     }
   }
@@ -105,7 +112,15 @@
     while(run===downloadRun){
       await sleep(650);const r=await fetch(`${RAILWAY}/api/carousel/jobs/${encodeURIComponent(jobId)}?_=${Date.now()}`,{cache:'no-store'});const data=await r.json().catch(()=>({}));if(run!==downloadRun)return;if(!r.ok)throw new Error(data.detail||text('Proses carousel gagal.','Carousel download failed.'));
       setProgress(data.progress||0,data.stage||text('Menyiapkan carousel','Preparing carousel'));
-      if(data.state==='ready'){setProgress(100,text('Selesai','Done'));frame.src=`${RAILWAY}/api/carousel/jobs/${encodeURIComponent(jobId)}/file?_=${Date.now()}`;if(button){button.disabled=false;button.textContent=button===carouselAll?'Download All (.zip)':text('Download item','Download item')}setTimeout(()=>{if(run===downloadRun)hideProgress()},2400);return}
+      if(data.state==='ready'){
+        setProgress(100,text('Selesai','Done'));
+        const fileUrl=`${RAILWAY}/api/carousel/jobs/${encodeURIComponent(jobId)}/file?_=${Date.now()}`;
+        frame.src=fileUrl;
+        try{const a=document.createElement('a');a.href=fileUrl;if(data.filename)a.download=data.filename;a.rel='noopener noreferrer';document.body.appendChild(a);a.click();setTimeout(()=>a.remove(),1000)}catch{}
+        if(button){button.disabled=false;button.textContent=button===carouselAll?'Download All (.zip)':text('Download item','Download item')}
+        setTimeout(()=>{if(run===downloadRun)hideProgress()},2400);
+        return;
+      }
       if(data.state==='error')throw new Error(data.error||text('Download carousel gagal.','Carousel download failed.'));
     }
   }
