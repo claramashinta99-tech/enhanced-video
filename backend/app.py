@@ -46,8 +46,20 @@ class QuietLogger:
     def warning(self,msg):pass
     def error(self,msg):pass
 
+_SHORT_ID=re.compile(r'^[A-Za-z0-9_-]{11}$')
+def canonicalize_youtube_url(value):
+    url=str(value)
+    try:
+        p=urlparse(url);host=(p.hostname or '').lower().rstrip('.')
+        if 'youtu' in host:
+            parts=[x for x in p.path.split('/') if x]
+            if len(parts)>=2 and parts[0].lower()=='shorts' and _SHORT_ID.fullmatch(parts[1]):
+                return f'https://www.youtube.com/watch?v={parts[1]}'
+    except Exception:pass
+    return url
+
 def validate_url(value):
-    url=str(value);p=urlparse(url);host=(p.hostname or '').lower().rstrip('.')
+    url=canonicalize_youtube_url(str(value));p=urlparse(url);host=(p.hostname or '').lower().rstrip('.')
     if p.scheme not in {'http','https'} or host not in ALLOWED_HOSTS:raise HTTPException(400,'Link harus dari YouTube atau TikTok.')
     return url
 
