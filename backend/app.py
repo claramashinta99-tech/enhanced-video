@@ -119,15 +119,36 @@ def base_opts(url=None,clients=None,use_cookie=True):
             if c:o['cookiefile']=str(c)
     return o
 
+def has_playable_formats(info):
+    if not info:return False
+    formats=info.get('formats') or []
+    if not formats:return bool(info.get('title') or info.get('id'))
+    for f in formats:
+        if not isinstance(f,dict):continue
+        fid=str(f.get('format_id') or '')
+        if fid.startswith('sb'):continue
+        v=f.get('vcodec');a=f.get('acodec')
+        if (v and v!='none') or (a and a!='none'):return True
+    return False
+
 def youtube_attempts():
     if youtube_cookie_ready():return [
+        {'name':'web-cookie','clients':['web'],'cookie':True},
         {'name':'mweb-cookie','clients':['mweb'],'cookie':True},
         {'name':'default-cookie','clients':['default','mweb'],'cookie':True},
         {'name':'safari-cookie','clients':['default','web_safari'],'cookie':True},
+        {'name':'web-pot','clients':['web'],'cookie':False},
         {'name':'mweb-public','clients':['mweb'],'cookie':False},
         {'name':'embedded-public','clients':['web_embedded'],'cookie':False},
         {'name':'android-vr','clients':['android_vr'],'cookie':False}]
-    return [{'name':'mweb-public','clients':['mweb'],'cookie':False},{'name':'embedded-public','clients':['web_embedded'],'cookie':False},{'name':'android-vr','clients':['android_vr'],'cookie':False}]
+    return [
+        {'name':'web-pot','clients':['web'],'cookie':False},
+        {'name':'default-public','clients':['default'],'cookie':False},
+        {'name':'mweb-public','clients':['mweb'],'cookie':False},
+        {'name':'web-creator','clients':['web_creator'],'cookie':False},
+        {'name':'embedded-public','clients':['web_embedded'],'cookie':False},
+        {'name':'android-vr','clients':['android_vr'],'cookie':False}
+    ]
 
 def extract_info_sync(url):
     cached=cache_get(url)
@@ -139,7 +160,9 @@ def extract_info_sync(url):
             with YoutubeDL(o) as y:info=y.extract_info(url,download=False,process=False)
             if info:
                 if info.get('entries'):info=next((x for x in info['entries'] if x),info)
-                cache_put(url,info,s);return info
+                if has_playable_formats(info):
+                    cache_put(url,info,s);return info
+                errors.append(f"{s['name']}:only_storyboards")
         except Exception as e:errors.append(f"{s['name']}:{type(e).__name__}")
     print(f"media info failed host={urlparse(url).hostname} attempts={','.join(errors)}",flush=True);raise DownloadError('media info failed')
 

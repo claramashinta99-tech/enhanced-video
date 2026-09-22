@@ -41,8 +41,10 @@ def _clean_error(exc):
 
 def youtube_attempts():
     attempts = [
-        {'name': 'mweb-pot-public', 'clients': ['mweb'], 'cookie': False},
+        {'name': 'web-pot-public', 'clients': ['web'], 'cookie': False},
         {'name': 'default-public', 'clients': ['default'], 'cookie': False},
+        {'name': 'mweb-pot-public', 'clients': ['mweb'], 'cookie': False},
+        {'name': 'web-creator-public', 'clients': ['web_creator'], 'cookie': False},
         {'name': 'embedded-public', 'clients': ['web_embedded'], 'cookie': False},
         {'name': 'android-vr-public', 'clients': ['android_vr'], 'cookie': False},
     ]
@@ -64,12 +66,12 @@ SELFTEST_STRATEGIES = [
 
 
 def base_opts(url=None, clients=None, use_cookie=True):
-    clients = clients or ['mweb']
+    clients = clients or ['web', 'mweb']
     opts = _ORIGINAL_BASE_OPTS(url, clients, use_cookie)
-    opts['socket_timeout'] = 8
-    opts['retries'] = 0
-    opts['fragment_retries'] = 1
-    opts['extractor_retries'] = 0
+    opts['socket_timeout'] = 15
+    opts['retries'] = 2
+    opts['fragment_retries'] = 2
+    opts['extractor_retries'] = 2
     return opts
 
 
@@ -92,9 +94,11 @@ def extract_info_sync(url):
             if info:
                 if info.get('entries'):
                     info = next((item for item in info['entries'] if item), info)
-                legacy.cache_put(url, info, strategy)
-                print(f'youtube info ok host={urlparse(url).hostname} strategy={strategy["name"]}', flush=True)
-                return info
+                if legacy.has_playable_formats(info):
+                    legacy.cache_put(url, info, strategy)
+                    print(f'youtube info ok host={urlparse(url).hostname} strategy={strategy["name"]}', flush=True)
+                    return info
+                errors.append(f'{strategy["name"]}=only_storyboards')
         except Exception as exc:
             detail = _clean_error(exc)
             errors.append(f'{strategy["name"]}={detail}')
