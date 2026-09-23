@@ -133,21 +133,17 @@ def has_playable_formats(info):
 
 def youtube_attempts():
     if youtube_cookie_ready():return [
-        {'name':'web-cookie','clients':['web'],'cookie':True},
-        {'name':'mweb-cookie','clients':['mweb'],'cookie':True},
-        {'name':'default-cookie','clients':['default','mweb'],'cookie':True},
-        {'name':'safari-cookie','clients':['default','web_safari'],'cookie':True},
-        {'name':'web-pot','clients':['web'],'cookie':False},
-        {'name':'mweb-public','clients':['mweb'],'cookie':False},
-        {'name':'embedded-public','clients':['web_embedded'],'cookie':False},
-        {'name':'android-vr','clients':['android_vr'],'cookie':False}]
+        {'name':'cookie-auth','clients':['mweb','android_vr','web_safari','default','web'],'cookie':True},
+        {'name':'combined-public','clients':['mweb','android_vr','web_safari','default','web'],'cookie':False},
+        {'name':'android-vr','clients':['android_vr'],'cookie':False},
+        {'name':'mweb-pot','clients':['mweb','default'],'cookie':False},
+        {'name':'embedded-public','clients':['web_embedded'],'cookie':False}]
     return [
-        {'name':'web-pot','clients':['web'],'cookie':False},
-        {'name':'default-public','clients':['default'],'cookie':False},
-        {'name':'mweb-public','clients':['mweb'],'cookie':False},
-        {'name':'web-creator','clients':['web_creator'],'cookie':False},
+        {'name':'combined-public','clients':['mweb','android_vr','web_safari','default','web'],'cookie':False},
+        {'name':'android-vr','clients':['android_vr'],'cookie':False},
+        {'name':'mweb-pot','clients':['mweb','default'],'cookie':False},
         {'name':'embedded-public','clients':['web_embedded'],'cookie':False},
-        {'name':'android-vr','clients':['android_vr'],'cookie':False}
+        {'name':'web-pot','clients':['web'],'cookie':False}
     ]
 
 def extract_info_sync(url):
@@ -157,12 +153,12 @@ def extract_info_sync(url):
     for s in attempts:
         try:
             o=base_opts(url,s.get('clients'),s.get('cookie',False));o['skip_download']=True
-            with YoutubeDL(o) as y:info=y.extract_info(url,download=False,process=False)
+            with YoutubeDL(o) as y:info=y.extract_info(url,download=False)
             if info:
                 if info.get('entries'):info=next((x for x in info['entries'] if x),info)
                 if has_playable_formats(info):
                     cache_put(url,info,s);return info
-                errors.append(f"{s['name']}:only_storyboards")
+                errors.append(f"{s['name']}:no_playable_formats")
         except Exception as e:errors.append(f"{s['name']}:{type(e).__name__}")
     print(f"media info failed host={urlparse(url).hostname} attempts={','.join(errors)}",flush=True);raise DownloadError('media info failed')
 
@@ -313,7 +309,6 @@ def add_quality_suffix(path,quality):
 
 def download_from_info(url,quality,w,info,strategy,job_id=None):
     fmt=exact_selector(info,quality)
-    if quality in EXACT_QUALITIES and not fmt:raise RuntimeError(f'exact {quality}p format not present')
     if quality=='audio':fmt=best_audio_selector(info)
     clear_workdir(w)
     with YoutubeDL(dl_opts(url,quality,w,strategy,fmt,job_id)) as y:y.process_ie_result(copy.deepcopy(info),download=True)
@@ -322,17 +317,17 @@ def download_from_info(url,quality,w,info,strategy,job_id=None):
 def download_sync(url,quality,w,job_id=None):
     cached=cache_get(url);errors=[]
     if job_id:job_update(job_id,state='working',progress=8,stage='Menyiapkan')
-    if cached:
-        try:return download_from_info(url,quality,w,cached['info'],cached['strategy'],job_id)
+    if cached and cached.get('info'):
+        try:return download_from_info(url,quality,w,cached['info'],cached.get('strategy') or {},job_id)
         except Exception as e:errors.append(f'cache:{type(e).__name__}')
     attempts=youtube_attempts() if is_youtube(url) else [{'name':'default','clients':None,'cookie':False}]
-    if cached:
+    if cached and cached.get('strategy'):
         preferred=cached['strategy']['name'];attempts.sort(key=lambda x:0 if x['name']==preferred else 1)
     for s in attempts:
         try:
             if job_id:job_update(job_id,state='working',progress=10,stage='Membaca sumber')
             o=base_opts(url,s.get('clients'),s.get('cookie',False));o['skip_download']=True
-            with YoutubeDL(o) as y:info=y.extract_info(url,download=False,process=False)
+            with YoutubeDL(o) as y:info=y.extract_info(url,download=False)
             if info.get('entries'):info=next((x for x in info['entries'] if x),info)
             path=download_from_info(url,quality,w,info,s,job_id);cache_put(url,info,s);return path
         except Exception as e:errors.append(f"{s['name']}:{type(e).__name__}")
@@ -341,6 +336,7 @@ def download_sync(url,quality,w,job_id=None):
 def cleanup(path):shutil.rmtree(path,ignore_errors=True)
 def youtube_error(exc):
     c=youtube_cookie_status();m=str(exc).lower()
+    if 'filesize' in m or 'larger than' in m or 'max_filesize' in m:return 'Ukuran file melebihi batas server (maksimal 500 MB).'
     if 'format' in m and 'not present' in m:return 'Resolusi yang dipilih tidak tersedia untuk video ini.'
     if 'unavailable' in m or 'not available' in m or 'private' in m or 'deleted' in m:return 'Video YouTube tidak tersedia atau bersifat privat.'
     if 'sign in' in m or 'not a bot' in m or 'confirm you' in m:return 'YouTube meminta verifikasi sesi atau bot.'

@@ -41,18 +41,14 @@ def _clean_error(exc):
 
 def youtube_attempts():
     attempts = [
-        {'name': 'web-pot-public', 'clients': ['web'], 'cookie': False},
-        {'name': 'default-public', 'clients': ['default'], 'cookie': False},
-        {'name': 'mweb-pot-public', 'clients': ['mweb'], 'cookie': False},
-        {'name': 'web-creator-public', 'clients': ['web_creator'], 'cookie': False},
-        {'name': 'embedded-public', 'clients': ['web_embedded'], 'cookie': False},
+        {'name': 'combined-public', 'clients': ['mweb', 'android_vr', 'web_safari', 'default', 'web'], 'cookie': False},
         {'name': 'android-vr-public', 'clients': ['android_vr'], 'cookie': False},
+        {'name': 'mweb-pot-public', 'clients': ['mweb', 'default'], 'cookie': False},
+        {'name': 'embedded-public', 'clients': ['web_embedded'], 'cookie': False},
+        {'name': 'web-pot-public', 'clients': ['web'], 'cookie': False},
     ]
     if legacy.youtube_cookie_ready():
-        attempts.extend([
-            {'name': 'default-embedded-cookie', 'clients': ['default', 'web_embedded'], 'cookie': True},
-            {'name': 'safari-cookie', 'clients': ['web_safari'], 'cookie': True},
-        ])
+        attempts.insert(0, {'name': 'cookie-auth', 'clients': ['mweb', 'android_vr', 'web_safari', 'default', 'web'], 'cookie': True})
     return attempts
 
 
@@ -66,7 +62,7 @@ SELFTEST_STRATEGIES = [
 
 
 def base_opts(url=None, clients=None, use_cookie=True):
-    clients = clients or ['web', 'mweb']
+    clients = clients or ['mweb', 'android_vr', 'web_safari', 'default', 'web']
     opts = _ORIGINAL_BASE_OPTS(url, clients, use_cookie)
     opts['socket_timeout'] = 15
     opts['retries'] = 2
@@ -90,7 +86,7 @@ def extract_info_sync(url):
             opts = base_opts(url, strategy.get('clients'), strategy.get('cookie', False))
             opts['skip_download'] = True
             with YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False, process=False)
+                info = ydl.extract_info(url, download=False)
             if info:
                 if info.get('entries'):
                     info = next((item for item in info['entries'] if item), info)
@@ -98,7 +94,7 @@ def extract_info_sync(url):
                     legacy.cache_put(url, info, strategy)
                     print(f'youtube info ok host={urlparse(url).hostname} strategy={strategy["name"]}', flush=True)
                     return info
-                errors.append(f'{strategy["name"]}=only_storyboards')
+                errors.append(f'{strategy["name"]}=no_playable_formats')
         except Exception as exc:
             detail = _clean_error(exc)
             errors.append(f'{strategy["name"]}={detail}')
@@ -212,9 +208,29 @@ def _manual_merge_youtube(workdir):
 
 def _youtube_video_download(url, quality, workdir, job_id=None):
     cached = legacy.cache_get(url)
+    if cached and cached.get('info'):
+        try:
+            if job_id:
+                legacy.job_update(job_id, state='working', progress=12, stage='Menyiapkan stream')
+            info = cached['info']
+            strategy = cached.get('strategy') or youtube_attempts()[0]
+            fmt = legacy.exact_selector(info, quality)
+            legacy.clear_workdir(workdir)
+            dl = legacy.dl_opts(url, quality, workdir, strategy, fmt, job_id)
+            dl['max_filesize'] = _YOUTUBE_VIDEO_MAX_FILESIZE
+            with YoutubeDL(dl) as ydl:
+                ydl.process_ie_result(copy.deepcopy(info), download=True)
+            path = _complete_youtube_output(workdir)
+            if path is None:
+                path = _manual_merge_youtube(workdir)
+            legacy.verify_file_quality(path, quality)
+            return legacy.add_quality_suffix(path, quality)
+        except Exception as exc:
+            print(f'cached youtube download failed quality={quality} error={_clean_error(exc)}', flush=True)
+
     attempts = youtube_attempts()
-    if cached:
-        preferred = cached.get('strategy', {}).get('name')
+    if cached and cached.get('strategy'):
+        preferred = cached['strategy'].get('name')
         attempts.sort(key=lambda x: 0 if x.get('name') == preferred else 1)
 
     errors = []
@@ -226,16 +242,13 @@ def _youtube_video_download(url, quality, workdir, job_id=None):
             opts = base_opts(url, strategy.get('clients'), strategy.get('cookie', False))
             opts['skip_download'] = True
             with YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False, process=False)
+                info = ydl.extract_info(url, download=False)
             if info and info.get('entries'):
                 info = next((item for item in info['entries'] if item), info)
             if not info:
                 raise RuntimeError('YouTube metadata empty')
 
             fmt = legacy.exact_selector(info, quality)
-            if quality in legacy.EXACT_QUALITIES and not fmt:
-                raise RuntimeError(f'exact {quality}p format not present')
-
             legacy.clear_workdir(workdir)
             dl = legacy.dl_opts(url, quality, workdir, strategy, fmt, job_id)
             dl['max_filesize'] = _YOUTUBE_VIDEO_MAX_FILESIZE
