@@ -115,7 +115,7 @@ def _convert_dolby_sync(input_path: Path, output_path: Path, mode: str, job_id: 
             '-x265-params', (
                 'hdr-opt=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:'
                 'master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,50):'
-                'max-cll=1000,400'
+                'max-cll=1000,400:frame-threads=1:pools=1:rc-lookahead=10'
             ),
         ]
     else:
@@ -123,11 +123,15 @@ def _convert_dolby_sync(input_path: Path, output_path: Path, mode: str, job_id: 
             '-color_primaries', 'bt2020',
             '-color_trc', 'arib-std-b67',
             '-colorspace', 'bt2020nc',
-            '-x265-params', 'colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc:repeat-headers=1',
+            '-x265-params', (
+                'colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc:repeat-headers=1:'
+                'frame-threads=1:pools=1:rc-lookahead=10'
+            ),
         ]
 
     cmd = [
         'ffmpeg', '-y',
+        '-threads', '2',
         '-i', str(input_path),
         '-t', str(DOLBY_MAX_DURATION),
         '-c:v', 'libx265',
@@ -135,7 +139,7 @@ def _convert_dolby_sync(input_path: Path, output_path: Path, mode: str, job_id: 
         '-preset', 'veryfast',
         '-crf', '19',
         '-pix_fmt', 'yuv420p10le',
-        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+        '-vf', "scale='if(gt(iw,1080),1080,trunc(iw/2)*2)':'if(gt(iw,1080),-2,trunc(ih/2)*2)'",
         *color_args,
         '-tag:v', 'hvc1',
         '-c:a', 'aac',
@@ -153,14 +157,16 @@ def _convert_dolby_sync(input_path: Path, output_path: Path, mode: str, job_id: 
 
     _, stderr = process.communicate(timeout=180)
     if process.returncode != 0:
+        if process.returncode in (-9, 137):
+            raise RuntimeError('Proses video melebihi batas memori server (OOM). Silakan coba lagi.')
         lines = [line.strip() for line in (stderr or '').splitlines() if line.strip()]
         err_candidates = [
             line for line in lines
-            if any(token in line.lower() for token in ('error', 'failed', 'invalid', 'unable to parse', 'unrecognized', 'cannot'))
-            and not line.startswith(('frame=', 'size=', 'Stream #'))
+            if any(token in line.lower() for token in ('error', 'failed', 'invalid', 'unable', 'unrecognized', 'cannot', 'unknown'))
+            and not line.startswith(('frame=', 'size=', 'Stream #', 'Metadata:'))
         ]
-        err_msg = ' | '.join(err_candidates[-3:]) if err_candidates else ('\n'.join(lines[-4:]) if lines else 'Unknown FFmpeg error')
-        print(f'dolby ffmpeg error: {err_msg}\nfull stderr:\n{stderr}', flush=True)
+        err_msg = ' | '.join(err_candidates[-3:]) if err_candidates else ('\n'.join(lines[-6:]) if lines else f'FFmpeg exited with code {process.returncode}')
+        print(f'dolby ffmpeg error code={process.returncode}: {err_msg}\nfull stderr:\n{stderr}', flush=True)
         raise RuntimeError(f'FFmpeg encoding failed: {err_msg}')
 
     if not output_path.is_file() or output_path.stat().st_size < 1024:
@@ -200,7 +206,7 @@ async def dolby_health():
         active = sum(1 for j in _jobs.values() if j.get('state') in {'queued', 'working'})
     return {
         'ok': True,
-        'version': '1.0.2',
+        'version': '1.0.3',
         'feature': 'TikTok Dolby Vision / HDR 10-bit',
         'has_libx265': has_x265,
         'max_duration': 30,
