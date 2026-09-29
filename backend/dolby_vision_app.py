@@ -206,7 +206,7 @@ async def dolby_health():
         active = sum(1 for j in _jobs.values() if j.get('state') in {'queued', 'working'})
     return {
         'ok': True,
-        'version': '1.0.3',
+        'version': '1.0.4',
         'feature': 'TikTok Dolby Vision / HDR 10-bit',
         'has_libx265': has_x265,
         'max_duration': 30,
@@ -312,7 +312,7 @@ async def get_dolby_job(job_id: str):
 
 
 @app.get('/api/dolby/jobs/{job_id}/file')
-async def get_dolby_job_file(job_id: str):
+async def get_dolby_job_file(job_id: str, preview: bool = False):
     with _jobs_lock:
         job = _jobs.get(job_id)
         if not job:
@@ -323,13 +323,17 @@ async def get_dolby_job_file(job_id: str):
         filename = job.get('filename') or path.name
 
     if not path.is_file():
-        _remove_job(job_id)
         raise HTTPException(410, 'File sudah tidak tersedia.')
+
+    headers = {'Cache-Control': 'no-store'}
+    if preview:
+        headers['Content-Disposition'] = f'inline; filename="{filename}"'
+    else:
+        headers['Content-Disposition'] = f'attachment; filename="{filename}"'
 
     return FileResponse(
         str(path),
         filename=filename,
         media_type='video/mp4',
-        headers={'Cache-Control': 'no-store'},
-        background=BackgroundTask(_remove_job, job_id),
+        headers=headers,
     )

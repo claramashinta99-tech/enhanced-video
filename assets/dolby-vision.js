@@ -204,7 +204,7 @@
     downloadLink.href = fileUrl;
     downloadLink.setAttribute('download', filename);
 
-    resultVideo.src = fileUrl;
+    resultVideo.src = `${fileUrl}?preview=1`;
     resultCard.classList.add('show');
     resultCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
