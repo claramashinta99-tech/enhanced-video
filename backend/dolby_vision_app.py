@@ -190,11 +190,19 @@ async def _run_dolby_job(job_id: str, input_path: Path, output_path: Path, mode:
 
 @app.get('/api/dolby/health')
 async def dolby_health():
+    has_x265 = False
+    try:
+        encoders = subprocess.check_output(['ffmpeg', '-encoders'], text=True, timeout=5)
+        has_x265 = 'libx265' in encoders
+    except Exception:
+        pass
     with _jobs_lock:
         active = sum(1 for j in _jobs.values() if j.get('state') in {'queued', 'working'})
     return {
         'ok': True,
+        'version': '1.0.2',
         'feature': 'TikTok Dolby Vision / HDR 10-bit',
+        'has_libx265': has_x265,
         'max_duration': 30,
         'max_filesize_mb': DOLBY_MAX_FILESIZE // (1024 * 1024),
         'active_jobs': active,
