@@ -24,8 +24,8 @@ from yt_dlp.utils import DownloadError
 
 APP_VERSION='1.9.0'
 app=FastAPI(title='RVL Media API',version=APP_VERSION)
-origins=[x.strip() for x in os.getenv('WEB_ORIGINS','https://reyval.web.id,https://www.reyval.web.id,https://enhanced-video.com,https://www.enhanced-video.com,http://localhost:5500,http://127.0.0.1:5500').split(',') if x.strip()]
-app.add_middleware(CORSMiddleware,allow_origins=origins,allow_credentials=False,allow_methods=['GET','POST','OPTIONS'],allow_headers=['Content-Type','Authorization'])
+origins=[x.strip() for x in os.getenv('WEB_ORIGINS','https://reyval.web.id,https://www.reyval.web.id,http://localhost:5500,http://127.0.0.1:5500').split(',') if x.strip()]
+app.add_middleware(CORSMiddleware,allow_origins=origins,allow_credentials=False,allow_methods=['GET','POST','OPTIONS'],allow_headers=['Content-Type'])
 ALLOWED_HOSTS={'youtube.com','www.youtube.com','m.youtube.com','music.youtube.com','youtu.be','tiktok.com','www.tiktok.com','m.tiktok.com','vm.tiktok.com','vt.tiktok.com'}
 MAX_FILESIZE=500*1024*1024
 DOWNLOAD_SLOTS=asyncio.Semaphore(int(os.getenv('MAX_CONCURRENT_DOWNLOADS','2')))

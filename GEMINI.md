@@ -56,6 +56,7 @@ Dokumen ini berisi riwayat lengkap percakapan, keputusan arsitektur, preferensi 
   - Suffix download sebelumnya bertuliskan `compressbase` -> Diganti menjadi `rvl-hd`.
   - Semua copy teks CompressBase dibersihkan dan diganti `RVL HD`.
   - Background desktop & mobile diatur menggunakan `rvl-bg-desktop-hd` dan asset RVL HD.
+
 ### B. YouTube Downloader & Backend Railway
 - **Problem Awal:**
   - Link YouTube lambat terdeteksi / loading terus-menerus.
@@ -67,13 +68,3 @@ Dokumen ini berisi riwayat lengkap percakapan, keputusan arsitektur, preferensi 
   - Multi-client fallback strategy: `combined-public` (`mweb`, `android_vr`, `web_safari`, `default`, `web`), `mweb-pot-public`, `embedded-public`, `web-pot-public`.
   - Menambahkan pengecekan batas ukuran file server (maksimal 500 MB).
   - Canonicalization URL Shorts dan sanitasi input regex.
-
-### C. TikTok Dolby Vision / HDR Tool (Fitur Baru)
-- **Tujuan:** Mengonversi video ke format Dolby Vision / HDR10 10-bit HEVC agar saat diupload ke TikTok, layar ponsel penonton otomatis meningkat kecerahannya (auto-glow / peak brightness).
-- **Arsitektur:**
-  - Terpisah total dari Clarity Method agar tidak mengganggu fitur yang sudah ada.
-  - Frontend: `/dolby-vision/index.html` dan `assets/dolby-vision.js`.
-  - Backend: `backend/dolby_vision_app.py` diproses via FFmpeg di Railway.
-  - Suffix unduhan: `[nama_file]_hdr-dolby_rvl-hd.mp4`.
-  - Batasan durasi: Maksimal 30 detik (dicek di client & server).
-  - Mode profil: Apple HLG (BT.2020 10-bit HLG) sebagai rekomendasi aman & HDR10 PQ (SMPTE 2084).

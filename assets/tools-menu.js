@@ -5,7 +5,6 @@
   if(!navRight)return;
   const items=[
     ['TikTok Method','../clarity/'],
-    ['TikTok Dolby Vision','../dolby-vision/'],
     ['TikTok Downloader','../tiktok-downloader/'],
     ['YouTube Video','../youtube-downloader/'],
     ['YouTube Shorts','../youtube-shorts/'],
