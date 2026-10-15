@@ -6,7 +6,7 @@
     const l = document.createElement('link');
     l.id = 'rvl-photo-enhance-style';
     l.rel = 'stylesheet';
-    l.href = '/assets/photo-enhance.css?v=2';
+    l.href = '/assets/photo-enhance.css?v=3';
     document.head.appendChild(l);
   }
   ensurePhotoCss();
@@ -23,7 +23,7 @@
   const dimInfoEl       = $('pe-dim-info');
   const studio          = $('pe-studio');
   const compareBox      = $('pe-compare-box');
-  const compareClip     = $('pe-compare-clip');
+  const compareStage    = $('pe-compare-stage');
   const compareDivider  = $('pe-compare-divider');
   const canvasEnhanced  = $('pe-canvas-enhanced');
   const ctxEnhanced     = canvasEnhanced.getContext('2d', { willReadFrequently: true });
@@ -179,14 +179,17 @@
   /* ── Split Compare Logic ────────────────────────────────── */
   function setSplitPosition(pct) {
     splitPercent = Math.max(0, Math.min(100, pct));
-    compareClip.style.width = `${splitPercent}%`;
-    compareDivider.style.left = `${splitPercent}%`;
+    if (compareStage) {
+      compareStage.style.setProperty('--pe-split', `${splitPercent}%`);
+    }
   }
 
   function handlePointer(e) {
-    const rect = compareBox.getBoundingClientRect();
+    const stage = compareStage || compareBox;
+    const rect = stage.getBoundingClientRect();
+    if (!rect.width) return;
     const x = e.clientX - rect.left;
-    const pct = (x / rect.width) * 100;
+    const pct = Math.max(0, Math.min(100, (x / rect.width) * 100));
     setSplitPosition(pct);
   }
 

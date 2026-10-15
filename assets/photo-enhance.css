@@ -115,7 +115,7 @@
   position:relative;
   width:100%;
   min-height:360px;
-  max-height:580px;
+  max-height:600px;
   border-radius:18px;
   overflow:hidden;
   user-select:none;
@@ -131,8 +131,20 @@
   background-color:#0b0e1b;
   display:grid;
   place-items:center;
+  padding:10px;
 }
-#pe-canvas-enhanced{
+.pe-compare-stage{
+  position:relative;
+  display:inline-block;
+  line-height:0;
+  max-width:100%;
+  max-height:560px;
+  border-radius:14px;
+  overflow:hidden;
+  box-shadow:0 12px 36px rgba(0,0,0,.65);
+  --pe-split:50%;
+}
+.pe-canvas-layer{
   display:block;
   max-width:100%;
   max-height:560px;
@@ -140,41 +152,42 @@
   height:auto;
   object-fit:contain;
 }
-.pe-compare-clip{
-  position:absolute;
-  top:0;
-  left:0;
-  bottom:0;
-  width:50%;
-  overflow:hidden;
-  pointer-events:none;
+#pe-canvas-enhanced{
+  position:relative;
+  z-index:1;
 }
 #pe-canvas-original{
-  display:block;
-  max-width:none;
-  width:auto;
-  height:auto;
+  position:absolute;
+  inset:0;
+  width:100%!important;
+  height:100%!important;
+  object-fit:contain;
+  pointer-events:none;
+  clip-path:inset(0 calc(100% - var(--pe-split, 50%)) 0 0);
+  -webkit-clip-path:inset(0 calc(100% - var(--pe-split, 50%)) 0 0);
+  z-index:2;
 }
 .pe-badge-side{
   position:absolute;
-  top:14px;
-  padding:4px 10px;
+  top:12px;
+  padding:5px 10px;
   border-radius:8px;
   font-size:10px;
   font-weight:800;
   letter-spacing:.08em;
   pointer-events:none;
-  z-index:3;
+  z-index:5;
+  line-height:1;
 }
 .pe-badge-orig{
-  left:14px;
+  left:12px;
   background:rgba(18,22,38,.85);
   color:#9da7c6;
   border:1px solid rgba(255,255,255,.15);
   backdrop-filter:blur(6px);
 }
 .pe-badge-enh{
-  right:14px;
+  right:12px;
   background:rgba(125,95,255,.9);
   color:#fff;
   border:1px solid rgba(255,255,255,.3);
@@ -185,13 +198,13 @@
   position:absolute;
   top:0;
   bottom:0;
-  left:50%;
+  left:var(--pe-split, 50%);
   transform:translateX(-50%);
-  width:3px;
+  width:2px;
   background:#fff;
-  box-shadow:0 0 14px rgba(255,255,255,.6);
+  box-shadow:0 0 12px rgba(255,255,255,.7), 0 0 4px rgba(0,0,0,.8);
   pointer-events:none;
-  z-index:4;
+  z-index:10;
 }
 .pe-divider-btn{
   position:absolute;
@@ -202,7 +215,7 @@
   height:36px;
   border-radius:50%;
   background:#fff;
-  border:2px solid #aa8cff;
+  border:2.5px solid #aa8cff;
   color:#151829;
   font-size:11px;
   font-weight:900;
