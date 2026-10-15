@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1020"><meta name="description" content="Photo Enhance — Edit foto, hapus background, dan terapkan filter langsung di browser. Proses lokal & AI, RVL HD."><title>Photo Enhance — RVL</title>
+  <link rel="stylesheet" href="../assets/styles.css">
+  <link rel="stylesheet" href="../assets/photo-enhance.css?v=1">
+  <script defer src="../assets/common.js?v=20260918bgm1"></script>
+  <script defer src="../assets/ambient.js?v=1"></script>
+  <script defer src="../assets/pixel.js?v=5"></script>
+  <script defer src="../assets/api-railway.js?v=6"></script>
+  <script defer src="../assets/router.js?v=14"></script>
+  <script defer src="../assets/nav-ui.js?v=5"></script>
+  <script defer src="../assets/photo-enhance.js?v=1"></script>
+</head>
+<body data-platform="photo-enhance">
+<div class="shell"><nav class="nav"><a class="brand" href="../"><span class="brand-mark"></span><span>RVL</span></a><div class="nav-right"><a class="nav-link" href="../">Homepage</a><div class="lang"><button type="button" data-lang="id">ID</button><button type="button" data-lang="en">EN</button></div></div></nav></div>
+<main class="downloader-page">
+  <div class="downloader-wrap pe-wrap">
+    <div class="downloader-head">
+      <span class="eyebrow"><i class="eyebrow-dot"></i>PHOTO ENHANCE</span>
+      <h1 id="pe-title">Photo Enhance</h1>
+      <p id="pe-sub">Upload foto — hapus background, terapkan filter, atau enhance langsung di browser dan via AI.</p>
+    </div>
+
+    <!-- Drop Zone -->
+    <div class="pe-drop-area" id="pe-drop" role="button" tabindex="0" aria-label="Upload foto">
+      <input id="pe-file-input" type="file" accept="image/*" hidden>
+      <div class="pe-drop-icon">🖼</div>
+      <b id="pe-drop-title">Pilih atau drop foto di sini</b>
+      <p id="pe-drop-sub">JPEG · PNG · WebP · maks 20 MB</p>
+      <button class="btn" type="button" id="pe-pick-btn">Pilih foto</button>
+    </div>
+
+    <!-- File meta bar (hidden until file loaded) -->
+    <div class="pe-file-bar" id="pe-file-bar">
+      <span class="pe-file-name" id="pe-file-name"></span>
+      <button class="pe-clear-btn" id="pe-clear-btn" type="button" aria-label="Hapus foto">✕</button>
+    </div>
+
+    <!-- Mode tabs -->
+    <div class="pe-tabs" id="pe-tabs" aria-hidden="true">
+      <button class="pe-tab active" data-tab="filter" type="button" id="tab-filter">Filter</button>
+      <button class="pe-tab" data-tab="removebg" type="button" id="tab-removebg">Hapus Background</button>
+    </div>
+
+    <!-- Studio: canvas + controls -->
+    <div class="pe-studio" id="pe-studio" aria-hidden="true">
+      <!-- Canvas preview -->
+      <div class="pe-canvas-wrap">
+        <canvas id="pe-canvas" aria-label="Preview foto"></canvas>
+        <div class="pe-canvas-empty" id="pe-canvas-empty">
+          <span>◇</span>
+          <small id="pe-empty-hint">Upload foto dulu</small>
+        </div>
+      </div>
+
+      <!-- Panel: Filter controls -->
+      <div class="pe-panel" id="panel-filter">
+        <div class="pe-panel-title" id="panel-filter-title">Filter &amp; Adjustment</div>
+
+        <div class="pe-sliders">
+          <div class="pe-slider-row">
+            <label for="sl-brightness" id="lbl-brightness">Brightness</label>
+            <div class="pe-slider-track">
+              <input id="sl-brightness" class="pe-slider" type="range" min="0" max="200" value="100">
+              <span class="pe-slider-val" id="val-brightness">100</span>
+            </div>
+          </div>
+          <div class="pe-slider-row">
+            <label for="sl-contrast" id="lbl-contrast">Contrast</label>
+            <div class="pe-slider-track">
+              <input id="sl-contrast" class="pe-slider" type="range" min="0" max="200" value="100">
+              <span class="pe-slider-val" id="val-contrast">100</span>
+            </div>
+          </div>
+          <div class="pe-slider-row">
+            <label for="sl-saturation" id="lbl-saturation">Saturation</label>
+            <div class="pe-slider-track">
+              <input id="sl-saturation" class="pe-slider" type="range" min="0" max="200" value="100">
+              <span class="pe-slider-val" id="val-saturation">100</span>
+            </div>
+          </div>
+          <div class="pe-slider-row">
+            <label for="sl-sharpness" id="lbl-sharpness">Sharpness</label>
+            <div class="pe-slider-track">
+              <input id="sl-sharpness" class="pe-slider" type="range" min="0" max="200" value="100">
+              <span class="pe-slider-val" id="val-sharpness">100</span>
+            </div>
+          </div>
+          <div class="pe-slider-row">
+            <label for="sl-warmth" id="lbl-warmth">Warmth</label>
+            <div class="pe-slider-track">
+              <input id="sl-warmth" class="pe-slider" type="range" min="-100" max="100" value="0">
+              <span class="pe-slider-val" id="val-warmth">0</span>
+            </div>
+          </div>
+          <div class="pe-slider-row">
+            <label for="sl-vignette" id="lbl-vignette">Vignette</label>
+            <div class="pe-slider-track">
+              <input id="sl-vignette" class="pe-slider" type="range" min="0" max="100" value="0">
+              <span class="pe-slider-val" id="val-vignette">0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Preset filters -->
+        <div class="pe-presets-label" id="pe-presets-label">Preset</div>
+        <div class="pe-presets" id="pe-presets">
+          <button class="pe-preset active" data-preset="none" type="button">Original</button>
+          <button class="pe-preset" data-preset="autohd" type="button">✨ Auto HD</button>
+          <button class="pe-preset" data-preset="vivid" type="button">Vivid</button>
+          <button class="pe-preset" data-preset="cool" type="button">Cool</button>
+          <button class="pe-preset" data-preset="warm" type="button">Warm</button>
+          <button class="pe-preset" data-preset="mono" type="button">Mono</button>
+          <button class="pe-preset" data-preset="fade" type="button">Fade</button>
+          <button class="pe-preset" data-preset="cinematic" type="button">Cinematic</button>
+        </div>
+
+        <div class="pe-filter-actions">
+          <button class="btn" id="pe-reset-filter" type="button">Reset</button>
+          <button class="btn primary" id="pe-download-filter" type="button" disabled>Download ↓</button>
+        </div>
+      </div>
+
+      <!-- Panel: Remove BG -->
+      <div class="pe-panel" id="panel-removebg" style="display:none">
+        <div class="pe-panel-title" id="panel-removebg-title">Hapus Background (AI)</div>
+        <p class="pe-panel-desc" id="pe-rmbg-desc">Foto diproses via backend AI. Hasilnya PNG transparan, siap dipakai.</p>
+        <div class="pe-rmbg-privacy" id="pe-rmbg-privacy"><span>●</span> Foto dikirim ke server untuk diproses, lalu langsung dihapus.</div>
+        <div class="pe-rmbg-actions">
+          <button class="btn primary large" id="pe-rmbg-btn" type="button" disabled>Hapus Background</button>
+        </div>
+        <div class="pe-progress-wrap" id="pe-rmbg-progress" style="display:none">
+          <div class="progress-bar"><div class="progress-fill" id="pe-rmbg-fill" style="width:0%"></div></div>
+          <div class="progress-row"><span id="pe-rmbg-status">Mengirim ke AI…</span><span id="pe-rmbg-pct">0%</span></div>
+        </div>
+        <div class="pe-rmbg-result" id="pe-rmbg-result" style="display:none">
+          <img id="pe-rmbg-preview" class="pe-rmbg-img" src="" alt="Background removed" style="display:none">
+          <div class="pe-filter-actions" style="margin-top:14px">
+            <a class="btn primary" id="pe-rmbg-download" download="bg-removed.png">Download PNG ↓</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pe-notice" id="pe-notice">
+      <span>●</span> <span id="pe-notice-text">Filter diproses 100% di browser lu. Foto tidak pernah dikirim ke server kecuali fitur AI diaktifkan.</span>
+    </div>
+
+    <div class="back-row"><a class="text-link" href="../">← <span data-i18n="back">Balik ke RVL</span></a></div>
+  </div>
+</main>
+<div class="toast" id="toast"></div>
+</body>
+</html>
