@@ -23,13 +23,16 @@ Dokumen ini berisi riwayat lengkap percakapan, keputusan arsitektur, preferensi 
    - Jangan pernah melakukan refactoring liar atau mengubah file/fitur yang tidak diminta.
    - Jika diminta memperbaiki satu hal spesifik, perbaiki HANYA hal itu saja ("fix yg itu aja jgn yg lain karena yg lain sudah perfectly working").
 
-2. **OTOMATIS COMMIT & PUSH KE GITHUB**
-   - Setiap kali selesai mengerjakan perbaikan atau task, **langsung git commit dan git push ke branch main**.
-   - Tidak perlu bertanya izin lagi ("mulai sekarang langsung commit push aja, jgn nanya lagi").
+2. **ALUR KERJA COMMIT, REVIEW & DEPLOY (User Workflow)**
+   - **Tugas AI:** Mengerjakan task/perbaikan dan melakukan **`git commit`** dengan pesan commit yang jelas. AI **DILARANG** melakukan auto `git push`.
+   - **Tugas User:**
+     1. Mereview/cek perubahan kode dan commit yang dibuat AI ("lu yg commit gw yg cek").
+     2. Melakukan `git push` manual ke GitHub bila sudah sesuai ("gw yg push").
+     3. Melakukan renew / redeploy manual di dashboard Railway ("gw yg push renew manual di railway").
 
 3. **PEMBERITAHUAN DEPLOY RAILWAY**
-   - Jika perubahan menyentuh file **backend** (`backend/app.py`, `backend/youtube_engine_app.py`, `backend/render_engine.py`, dll.) yang membutuhkan deploy ulang:
-   - Beritahu user secara jelas: *"Perubahan backend sudah di-push. Silakan lakukan Deploy Latest Commit di dashboard Railway."*
+   - Jika perubahan menyentuh file **backend** (`backend/app.py`, `backend/youtube_engine_app.py`, `backend/photo_enhance_app.py`, `backend/render_engine.py`, dll.) yang membutuhkan deploy ulang:
+   - Cukup ingatkan user: *"Perubahan backend sudah di-commit. Silakan review, push ke GitHub, lalu renew/redeploy di dashboard Railway."*
 
 4. **BRANDING & NAMING STANDARD (RVL HD)**
    - Dilarang keras memunculkan teks/nama `CompressBase` di UI, copy status, notification, ataupun penamaan file output.
