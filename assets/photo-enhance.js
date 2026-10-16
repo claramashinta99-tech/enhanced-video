@@ -1,13 +1,13 @@
 /* Photo Enhance — RVL HD
-   Wink Bypass Engine (AI Super-Resolution & Quality Restoration)
-   Integrated with Railway AI Backend & Authentic Wink APP1 EXIF 64-Bit Injection */
+   Wink Bypass Engine (AI Quality Restoration, HD Clarity, Surface Smoothing & Upscale)
+   Integrated with Authentic Wink APP1 EXIF 64-Bit Injection */
 (() => {
   function ensurePhotoCss() {
     if (document.querySelector('#rvl-photo-enhance-style') || document.querySelector('link[href*="photo-enhance.css"]')) return;
     const l = document.createElement('link');
     l.id = 'rvl-photo-enhance-style';
     l.rel = 'stylesheet';
-    l.href = '/assets/photo-enhance.css?v=7';
+    l.href = '/assets/photo-enhance.css?v=8';
     document.head.appendChild(l);
   }
   ensurePhotoCss();
@@ -53,20 +53,16 @@
   /* ── State ──────────────────────────────────────────────── */
   let sourceImg = null;
   let sourceFile = null;
-  let upscaledBlob = null;
-  let upscaledImg = null;
   let origW = 0, origH = 0;
   let previewW = 0, previewH = 0;
   let targetW = 0, targetH = 0;
-  let selectedMultiplier = 4; // default 4x Ultra HD Wink Quality Restoration
+  let selectedMultiplier = 4; // default 4x Ultra HD
   let splitPercent = 50;
   let isDragging = false;
   let isZoomed = false;
-  let isProcessing = false;
-  let isUpscaled = false;
+  let isExporting = false;
 
   /* ── Precomputed Range LUT for Bilateral Smoothing ──────── */
-  // Range weight: exp(-delta^2 / (2 * sigma^2)) with sigma = 18.0
   const RANGE_SIGMA = 18.0;
   const RANGE_LUT = new Float32Array(256);
   for (let i = 0; i < 256; i++) {
@@ -113,12 +109,14 @@
   function updateButtonLabels() {
     const en = lang() === 'en';
     if (upscaleLabel) {
-      upscaleLabel.textContent = isUpscaled
-        ? (en ? `⚡ Re-upscale (${selectedMultiplier}×)` : `⚡ Upscale Ulang (${selectedMultiplier}×)`)
-        : (en ? `⚡ Upscale Foto (${selectedMultiplier}× Wink Bypass)` : `⚡ Upscale Foto (${selectedMultiplier}× Wink Bypass)`);
+      upscaleLabel.textContent = en 
+        ? `⚡ Download Restored Photo (${selectedMultiplier}× Wink Bypass) ↓` 
+        : `⚡ Download Foto HD (${selectedMultiplier}× Wink Bypass) ↓`;
     }
     if (dlLabel) {
-      dlLabel.textContent = en ? 'Download Restored Photo (Wink Bypass) ↓' : 'Download Restored Photo (Wink Bypass) ↓';
+      dlLabel.textContent = en 
+        ? `Download Restored Photo (${selectedMultiplier}× Wink Bypass) ↓` 
+        : `Download Foto Restorasi (${selectedMultiplier}× Wink Bypass) ↓`;
     }
   }
 
@@ -177,7 +175,7 @@
     return out;
   }
 
-  /* ── Wink Quality Restoration Engine (Smooth Surface + Razor Edges) ── */
+  /* ── Wink Quality Restoration Engine (HD, Jernih, Smooth) ── */
   function applyWinkQualityRestoration(ctx, w, h) {
     const imgData = ctx.getImageData(0, 0, w, h);
     const data = imgData.data;
@@ -187,32 +185,34 @@
     const Cb = new Float32Array(total);
     const Cr = new Float32Array(total);
 
-    // 1. RGB -> YCbCr with Dynamic Shadow Recovery
+    // 1. RGB -> YCbCr with Dynamic Shadow Recovery & Clarity Tone Mapping
     for (let i = 0, p = 0; p < total; i += 4, p++) {
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
 
-      let y = 0.299 * r + 0.587 * g + 0.114 * b;
+      let yVal = 0.299 * r + 0.587 * g + 0.114 * b;
       Cb[p] = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
       Cr[p] = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
 
-      // Wink Dynamic Shadow Recovery: gently lift deep shadows
-      if (y < 60) {
-        y += (60 - y) * 0.26;
+      // Dynamic Shadow Recovery: lift muddy dark tones (up to +28 lift in deep shadows)
+      if (yVal < 110) {
+        const t = (110 - yVal) / 110;
+        yVal += Math.pow(t, 1.6) * 28.0;
       }
-      if (y < 210) {
-        y = 255 * Math.pow(y / 255, 0.93);
+      // Micro-contrast gamma for crisp transparency ("jernih")
+      if (yVal < 220) {
+        yVal = 255.0 * Math.pow(yVal / 255.0, 0.94);
       }
-      Y[p] = y;
+      Y[p] = yVal;
     }
 
-    // 2. Chroma Denoising (radius 2 blur eliminates purple/green grain)
-    const Cb_smooth = fastSeparableBoxBlur(Cb, w, h, 2);
-    const Cr_smooth = fastSeparableBoxBlur(Cr, w, h, 2);
+    // 2. Chroma Denoising (radius 2 blur eliminates color noise blotches)
+    const Cb_blur = fastSeparableBoxBlur(Cb, w, h, 2);
+    const Cr_blur = fastSeparableBoxBlur(Cr, w, h, 2);
 
-    // 3. Bilateral Surface Smoothing on Luminance Y
-    // Smooth out flat areas (skin, cheeks, walls, sky) while keeping true edges intact
+    // 3. Bilateral Surface Denoising on Luminance Y
+    // Smooths flat areas (skin, cheeks, walls, sky) to porcelain finish
     const yBlur = fastSeparableBoxBlur(Y, w, h, 3);
     const Y_smooth = new Float32Array(total);
 
@@ -220,50 +220,34 @@
       const orig = Y[p];
       const blur = yBlur[p];
       const diff = Math.min(255, Math.abs(orig - blur) | 0);
-      const wBi = RANGE_LUT[diff]; // close to 1.0 for small diff, drops for big diff
+      const wBi = RANGE_LUT[diff];
       Y_smooth[p] = orig * (1.0 - wBi) + blur * wBi;
     }
 
     // 4. Directional High-Pass Detail Synthesis (Super-Resolution Edge Boost)
-    const Y_out = new Float32Array(total);
-    for (let y = 0; y < h; y++) {
-      const yw = y * w;
-      const yPrev = Math.max(0, y - 1) * w;
-      const yNext = Math.min(h - 1, y + 1) * w;
+    const Y_final = new Float32Array(total);
+    for (let p = 0; p < total; p++) {
+      const edge = Y[p] - yBlur[p];
+      const absEdge = Math.abs(edge);
 
-      for (let x = 0; x < w; x++) {
-        const p = yw + x;
-        const xPrev = Math.max(0, x - 1);
-        const xNext = Math.min(w - 1, x + 1);
-
-        // Simple gradient magnitude to identify true edges
-        const gx = Y[yw + xNext] - Y[yw + xPrev];
-        const gy = Y[yNext + x] - Y[yPrev + x];
-        const gMag = Math.sqrt(gx * gx + gy * gy);
-
-        const smoothVal = Y_smooth[p];
-        const edgeDetail = Y[p] - yBlur[p];
-
-        if (gMag > 5.5) {
-          // True edge (eyes, hair, lines, text): boost sharpness by 1.65x
-          Y_out[p] = smoothVal + edgeDetail * 1.65;
-        } else {
-          // Flat surface (skin, wall, sky): keep silky smooth without noise
-          Y_out[p] = smoothVal + edgeDetail * 0.15;
-        }
+      if (absEdge > 3.0) {
+        // True edge / detail (eyes, hair, lines, text): boost by 1.7x for HD clarity
+        Y_final[p] = Y_smooth[p] + edge * 1.7;
+      } else {
+        // Flat surface: eliminate noise & grain for silky smooth texture
+        Y_final[p] = Y_smooth[p] + edge * 0.12;
       }
     }
 
-    // 5. YCbCr back to RGB
+    // 5. Subtle Color Vibrance Pop (+8% chroma clarity)
     for (let i = 0, p = 0; p < total; i += 4, p++) {
-      const yVal = Y_out[p];
-      const cb = Cb_smooth[p] - 128;
-      const cr = Cr_smooth[p] - 128;
+      const yVal = Y_final[p];
+      const cb = 128 + (Cb_blur[p] - 128) * 1.08;
+      const cr = 128 + (Cr_blur[p] - 128) * 1.08;
 
-      data[i]     = clamp(yVal + 1.402 * cr);
-      data[i + 1] = clamp(yVal - 0.344136 * cb - 0.714136 * cr);
-      data[i + 2] = clamp(yVal + 1.772 * cb);
-      // data[i + 3] (alpha) unchanged
+      data[i]     = clamp(yVal + 1.402 * (cr - 128));
+      data[i + 1] = clamp(yVal - 0.344136 * (cb - 128) - 0.714136 * (cr - 128));
+      data[i + 2] = clamp(yVal + 1.772 * (cb - 128));
     }
 
     ctx.putImageData(imgData, 0, 0);
@@ -292,7 +276,7 @@
 
   /* ── Multiplier Button Selection ────────────────────────── */
   function setMultiplier(mult) {
-    if (isProcessing) return;
+    if (isExporting) return;
     selectedMultiplier = mult;
 
     if (mult === 2) {
@@ -305,16 +289,12 @@
 
     calculateTargetDimensions();
     updateButtonLabels();
-
-    if (isUpscaled) {
-      upscaleBtn.style.display = 'block';
-    }
   }
 
   multBtn2?.addEventListener('click', () => setMultiplier(2));
   multBtn4?.addEventListener('click', () => setMultiplier(4));
 
-  /* ── File Loading ───────────────────────────────────────── */
+  /* ── File Loading: Instant Before vs After Comparison ───── */
   function loadFile(file) {
     if (!file) return;
     if (!file.type.startsWith('image/')) { toast(text('File bukan gambar.', 'Not an image file.')); return; }
@@ -322,9 +302,6 @@
 
     sourceFile = file;
     fileNameEl.textContent = file.name;
-    isUpscaled = false;
-    upscaledBlob = null;
-    upscaledImg = null;
 
     const url = URL.createObjectURL(file);
     const img = new Image();
@@ -340,12 +317,6 @@
       fileBar.classList.add('show');
       studio.removeAttribute('aria-hidden');
 
-      // Buttons initial state: show Upscale button, hide Download button
-      upscaleBtn.style.display = 'block';
-      upscaleBtn.disabled = false;
-      downloadBtn.style.display = 'none';
-      updateButtonLabels();
-
       // Setup stage canvas dimensions with retina scaling for crisp viewing
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       const maxDisplayDim = 1920;
@@ -359,18 +330,31 @@
       canvasOriginal.width = previewW;
       canvasOriginal.height = previewH;
 
-      // Draw original preview cleanly on BOTH canvases initially
+      // 1. Draw ORIGINAL image on canvasOriginal
       ctxOriginal.imageSmoothingEnabled = true;
       ctxOriginal.imageSmoothingQuality = 'high';
+      ctxOriginal.clearRect(0, 0, previewW, previewH);
       ctxOriginal.drawImage(sourceImg, 0, 0, previewW, previewH);
 
+      // 2. Draw & IMMEDIATELY APPLY WINK BYPASS RESTORATION to canvasEnhanced
       ctxEnhanced.imageSmoothingEnabled = true;
       ctxEnhanced.imageSmoothingQuality = 'high';
+      ctxEnhanced.clearRect(0, 0, previewW, previewH);
       ctxEnhanced.drawImage(sourceImg, 0, 0, previewW, previewH);
+      applyWinkQualityRestoration(ctxEnhanced, previewW, previewH);
 
-      enhBadge.textContent = 'PREVIEW';
+      // Badges & slider ready
+      enhBadge.textContent = 'WINK BYPASS (HD)';
       setSplitPosition(50);
+
+      // Buttons
+      upscaleBtn.style.display = 'block';
+      upscaleBtn.disabled = false;
+      downloadBtn.style.display = 'none';
+      updateButtonLabels();
+
       URL.revokeObjectURL(url);
+      toast(text('Foto siap! Geser slider untuk melihat perbandingan Before vs After.', 'Ready! Slide the middle divider to compare Before vs After.'));
     };
     img.onerror = () => {
       toast(text('Gagal memuat gambar.', 'Failed to load image.'));
@@ -381,9 +365,6 @@
   function clearFile() {
     sourceImg = null;
     sourceFile = null;
-    upscaledBlob = null;
-    upscaledImg = null;
-    isUpscaled = false;
     fileInput.value = '';
     fileBar.classList.remove('show');
     studio.setAttribute('aria-hidden', 'true');
@@ -528,7 +509,7 @@
   }
 
   /* ── High-Resolution Output Exporter ────────────────────── */
-  async function generateHighResOutputBlob(mult) {
+  async function generateFullResRestoredBlob(mult) {
     const outW = targetW;
     const outH = targetH;
 
@@ -568,33 +549,35 @@
     });
   }
 
-  /* ── Upscale Action (Backend AI + Instant Client Engine) ─── */
-  upscaleBtn.addEventListener('click', async () => {
-    if (!sourceImg || !sourceFile || isProcessing) return;
+  /* ── Export / Download Action ────────────────────────────── */
+  async function performExportAndDownload() {
+    if (!sourceImg || !sourceFile || isExporting) return;
 
-    isProcessing = true;
+    isExporting = true;
     upscaleBtn.disabled = true;
+    downloadBtn.disabled = true;
     renderProgress.style.display = 'block';
     renderFill.style.width = '20%';
     renderPct.textContent = '20%';
-    renderStatus.textContent = text('Menyiapkan AI Super-Resolution & Quality Restoration…', 'Preparing AI Super-Resolution & Quality Restoration…');
+    renderStatus.textContent = text('Menyiapkan canvas resolusi tinggi Wink Bypass…', 'Preparing high-resolution Wink Bypass canvas…');
 
-    await new Promise(r => setTimeout(r, 80));
+    await new Promise(r => setTimeout(r, 60));
 
     try {
-      renderFill.style.width = '45%';
-      renderPct.textContent = '45%';
-      renderStatus.textContent = text(`Menghaluskan tekstur permukaan & merekonstruksi detail ${selectedMultiplier}×…`, `Smoothing surface textures & reconstructing ${selectedMultiplier}× details…`);
+      let finalBlob = null;
 
-      // Try Railway backend first if reachable
-      let backendSuccess = false;
+      // Try Railway backend if available
       try {
+        renderFill.style.width = '45%';
+        renderPct.textContent = '45%';
+        renderStatus.textContent = text(`Memproses neural upscale ${selectedMultiplier}×…`, `Processing ${selectedMultiplier}× neural upscale…`);
+
         const formData = new FormData();
         formData.append('file', sourceFile);
         formData.append('multiplier', String(selectedMultiplier));
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s fast check
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
 
         const resp = await fetch('https://enhanced-video-production.up.railway.app/api/photo/upscale', {
           method: 'POST',
@@ -606,95 +589,69 @@
         if (resp.ok) {
           const blob = await resp.blob();
           if (blob && blob.size > 1000) {
-            upscaledBlob = blob;
-            const upscaledUrl = URL.createObjectURL(blob);
-            const enhancedImg = new Image();
-            await new Promise((res, rej) => {
-              enhancedImg.onload = res;
-              enhancedImg.onerror = rej;
-              enhancedImg.src = upscaledUrl;
-            });
-            upscaledImg = enhancedImg;
-            ctxEnhanced.clearRect(0, 0, previewW, previewH);
-            ctxEnhanced.drawImage(upscaledImg, 0, 0, previewW, previewH);
-            backendSuccess = true;
+            finalBlob = blob;
           }
         }
-      } catch (backendErr) {
-        // Will seamlessly execute high-fidelity client engine below
+      } catch (e) {
+        // Fallback to high-resolution local engine
       }
 
-      if (!backendSuccess) {
-        // Run full client-side Wink Quality Restoration engine on canvasEnhanced
-        ctxEnhanced.clearRect(0, 0, previewW, previewH);
-        ctxEnhanced.drawImage(sourceImg, 0, 0, previewW, previewH);
-        applyWinkQualityRestoration(ctxEnhanced, previewW, previewH);
+      renderFill.style.width = '70%';
+      renderPct.textContent = '70%';
+      renderStatus.textContent = text('Menghaluskan permukaan & menajamkan micro-detail…', 'Smoothing surfaces & sharpening micro-details…');
+
+      await new Promise(r => setTimeout(r, 60));
+
+      if (!finalBlob) {
+        finalBlob = await generateFullResRestoredBlob(selectedMultiplier);
       }
 
-      renderFill.style.width = '80%';
-      renderPct.textContent = '80%';
+      if (!finalBlob) {
+        throw new Error('Gagal menghasilkan file resolusi tinggi.');
+      }
+
+      renderFill.style.width = '90%';
+      renderPct.textContent = '90%';
       renderStatus.textContent = text('Menginjeksi metadata Wink EXIF 64-bit & kompresi JPEG Q98…', 'Injecting Wink EXIF metadata & compressing JPEG Q98…');
 
       await new Promise(r => setTimeout(r, 60));
 
-      if (!upscaledBlob) {
-        upscaledBlob = await generateHighResOutputBlob(selectedMultiplier);
-      }
-
-      if (!upscaledBlob) {
-        throw new Error('Gagal menghasilkan foto hasil restorasi.');
-      }
-
-      // Re-draw original on canvasOriginal so comparison is 100% crisp
-      ctxOriginal.clearRect(0, 0, previewW, previewH);
-      ctxOriginal.drawImage(sourceImg, 0, 0, previewW, previewH);
-
-      // Update UI state
-      isUpscaled = true;
-      enhBadge.textContent = `WINK BYPASS (${selectedMultiplier}×)`;
-      setSplitPosition(50);
-
       renderFill.style.width = '100%';
       renderPct.textContent = '100%';
-      renderStatus.textContent = text('Selesai!', 'Done!');
+      renderStatus.textContent = text('Selesai! Mengunduh foto…', 'Done! Downloading photo…');
+
+      const rawName = sourceFile.name.replace(/\.[^.]+$/, '');
+      const filename = `${rawName}_rvl-wink-bypass.jpg`;
+
+      const dlUrl = URL.createObjectURL(finalBlob);
+      const a = document.createElement('a');
+      a.href = dlUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(dlUrl), 5000);
 
       setTimeout(() => {
         renderProgress.style.display = 'none';
-        upscaleBtn.style.display = 'none';
-        downloadBtn.style.display = 'block';
+        upscaleBtn.disabled = false;
         downloadBtn.disabled = false;
-        isProcessing = false;
-        updateButtonLabels();
-      }, 400);
+        isExporting = false;
+      }, 500);
 
-      toast(text(`Restorasi ${selectedMultiplier}× Wink Bypass berhasil!`, `${selectedMultiplier}× Wink Bypass restoration completed!`));
+      toast(text('Foto hasil Wink Bypass berhasil diunduh!', 'Wink Bypass restored photo downloaded successfully!'));
     } catch (err) {
-      console.error('Upscale error:', err);
+      console.error('Export error:', err);
       renderProgress.style.display = 'none';
       upscaleBtn.disabled = false;
-      isProcessing = false;
-      toast(text(`Gagal memproses restorasi: ${err.message || 'Error'}`, `Failed to process restoration: ${err.message || 'Error'}`));
+      downloadBtn.disabled = false;
+      isExporting = false;
+      toast(text(`Gagal: ${err.message || 'Error'}`, `Failed: ${err.message || 'Error'}`));
     }
-  });
+  }
 
-  /* ── Download Action ────────────────────────────────────── */
-  downloadBtn.addEventListener('click', () => {
-    if (!upscaledBlob || !sourceFile) return;
-
-    const rawName = sourceFile.name.replace(/\.[^.]+$/, '');
-    const filename = `${rawName}_rvl-wink-bypass.jpg`;
-
-    const dlUrl = URL.createObjectURL(upscaledBlob);
-    const a = document.createElement('a');
-    a.href = dlUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(dlUrl), 5000);
-
-    toast(text('Foto hasil Wink Bypass sedang diunduh!', 'Downloading Wink Bypass restored photo!'));
-  });
+  upscaleBtn.addEventListener('click', performExportAndDownload);
+  downloadBtn.addEventListener('click', performExportAndDownload);
 
   /* ── Drag & Drop Listeners ──────────────────────────────── */
   pickBtn.addEventListener('click', e => { e.stopPropagation(); fileInput.click(); });
