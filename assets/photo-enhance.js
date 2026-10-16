@@ -6,7 +6,7 @@
     const l = document.createElement('link');
     l.id = 'rvl-photo-enhance-style';
     l.rel = 'stylesheet';
-    l.href = '/assets/photo-enhance.css?v=4';
+    l.href = '/assets/photo-enhance.css?v=5';
     document.head.appendChild(l);
   }
   ensurePhotoCss();
@@ -30,6 +30,7 @@
   const canvasOriginal  = $('pe-canvas-original');
   const ctxOriginal     = canvasOriginal.getContext('2d', { willReadFrequently: true });
   const holdBtn         = $('pe-hold-btn');
+  const zoomBtn         = $('pe-zoom-btn');
   const origDimEl       = $('pe-orig-dim');
   const outDimEl        = $('pe-out-dim');
   const downloadBtn     = $('pe-download-btn');
@@ -49,8 +50,16 @@
   let targetW = 0, targetH = 0;
   let splitPercent = 50;
   let isDragging = false;
-  let renderScheduled = false;
+  let isZoomed = false;
   let previousSplit = 50;
+
+  /* ── Precomputed Range LUT for Bilateral Smoothing ──────── */
+  // Gaussian range weight: exp(-delta^2 / (2 * sigma^2)) with sigma = 15.0
+  const RANGE_SIGMA = 15.0;
+  const RANGE_LUT = new Float32Array(256);
+  for (let i = 0; i < 256; i++) {
+    RANGE_LUT[i] = Math.exp(-(i * i) / (2 * RANGE_SIGMA * RANGE_SIGMA));
+  }
 
   /* ── i18n ───────────────────────────────────────────────── */
   const lang = () => localStorage.getItem('reyval-lang') || 'id';
@@ -60,21 +69,22 @@
     const en = lang() === 'en';
     $('pe-title').textContent = en ? 'Wink Bypass' : 'Wink Bypass';
     $('pe-sub').textContent   = en 
-      ? 'Restore photo quality & micro-details with the Wink Quality Restoration algorithm. Dynamic shadow recovery, fine micro-textures, and up to Ultra HD upscale.' 
+      ? 'Restore photo quality & micro-details with the Wink Quality Restoration algorithm. Dynamic shadow recovery, porcelain-smooth denoise, and 4x Ultra HD upscale.' 
       : 'Restorasi kualitas foto & kejernihan mikro dengan algoritma Wink Quality Restoration. Mengangkat detail bayangan, menajamkan teks & tekstur, serta upscale hingga Ultra HD.';
     $('pe-drop-title').textContent = en ? 'Choose or drop photo here' : 'Pilih atau drop foto di sini';
     $('pe-drop-sub').textContent   = en ? 'JPEG · PNG · WebP · max 25 MB' : 'JPEG · PNG · WebP · maks 25 MB';
     pickBtn.textContent            = en ? 'Choose photo' : 'Pilih foto';
     clearBtn.textContent           = en ? '✕ Change' : '✕ Ganti';
     holdBtn.textContent            = en ? 'Hold: View Original' : 'Tahan: Lihat Asli';
+    if (zoomBtn) zoomBtn.textContent = isZoomed ? (en ? '🔍 Zoom Out' : '🔍 Perkecil') : (en ? '🔍 Zoom 2x' : '🔍 Zoom 2x');
     $('pe-hint-text').textContent  = en ? 'Drag middle slider to compare Original vs Wink Bypass' : 'Geser garis tengah untuk bandingkan Original vs Wink Bypass';
     $('pe-features-label').textContent = en ? 'Active Restoration Features' : 'Fitur Restorasi Aktif';
     $('spec-detail-title').textContent = en ? 'Multi-Scale Micro-Detail' : 'Multi-Scale Micro-Detail';
     $('spec-detail-desc').textContent  = en ? 'Reconstructs edges, text, and micro-textures without halo artifacts.' : 'Rekonstruksi ketajaman tepi, teks, dan tekstur mikro tanpa digital halo.';
     $('spec-shadow-title').textContent = en ? 'Dynamic Shadow Recovery' : 'Dynamic Shadow Recovery';
     $('spec-shadow-desc').textContent  = en ? 'Lifts deep shadow details with a gentle toe-curve without washed-out blacks.' : 'Mengangkat detail bayangan gelap dengan kurva halus tanpa crushed blacks.';
-    $('spec-denoise-title').textContent= en ? 'Luminance Bilateral Denoise' : 'Luminance Bilateral Denoise';
-    $('spec-denoise-desc').textContent = en ? 'Eliminates JPEG artifacts & compression noise without chromatic fringing.' : 'Membersihkan noise & artefak kompresi JPEG tanpa chromatic fringe.';
+    $('spec-denoise-title').textContent= en ? 'Bilateral Surface Smoothing' : 'Bilateral Surface Smoothing';
+    $('spec-denoise-desc').textContent = en ? 'Eliminates JPEG artifacts & compression noise for silky, porcelain-smooth surfaces.' : 'Membersihkan noise & artefak kompresi agar permukaan halus lembut.';
     $('spec-meta-title').textContent   = en ? 'Wink EXIF 64-Bit Injection' : 'Wink EXIF 64-Bit Injection';
     $('spec-meta-desc').textContent    = en ? 'Studio JPEG Q98 format with exact authentic Wink APP1 EXIF structure.' : 'Format JPEG Q98 Studio dengan struktur APP1 EXIF asli Wink.';
     $('lbl-orig-dim').textContent      = en ? 'Original Size:' : 'Resolusi Asli:';
@@ -114,19 +124,25 @@
       dimInfoEl.textContent = `${origW} × ${origH}`;
       origDimEl.textContent = `${origW} × ${origH} px`;
 
-      // Calculate Target Upscale Dimensions (Wink Quality Restoration Target)
-      // 720p 9:16 -> 2880 x 5120 (4x)
+      // Calculate Target Upscale Dimensions (Wink Quality Restoration 4x Target)
       calculateTargetDimensions();
 
       fileBar.classList.add('show');
       studio.removeAttribute('aria-hidden');
       downloadBtn.disabled = false;
 
-      // Calculate preview dimensions (max 1200px max edge for butter-smooth live interaction)
-      const MAX_PREVIEW = 1200;
-      const scale = Math.min(1, MAX_PREVIEW / origW, MAX_PREVIEW / origH);
-      previewW = Math.round(origW * scale);
-      previewH = Math.round(origH * scale);
+      // Studio High-Definition Preview Buffer (2x-4x upscaled density so upscale is clearly visible)
+      // Render preview with retina / high-resolution scaling so crisp details and smooth textures pop
+      const dpr = window.devicePixelRatio && window.devicePixelRatio > 1 ? window.devicePixelRatio : 1.5;
+      const scale = Math.min(2.5, Math.max(1.5, dpr));
+      const maxDim = 2560;
+
+      previewW = Math.min(maxDim, Math.round(origW * scale));
+      previewH = Math.min(maxDim, Math.round(origH * scale));
+
+      // Make dimensions even
+      previewW -= previewW % 2;
+      previewH -= previewH % 2;
 
       // Set canvas dimensions
       canvasEnhanced.width = previewW;
@@ -135,6 +151,8 @@
       canvasOriginal.height = previewH;
 
       // Draw original preview
+      ctxOriginal.imageSmoothingEnabled = true;
+      ctxOriginal.imageSmoothingQuality = 'high';
       ctxOriginal.drawImage(sourceImg, 0, 0, previewW, previewH);
 
       setSplitPosition(50);
@@ -157,6 +175,7 @@
     fileInput.value = '';
     origDimEl.textContent = '—';
     outDimEl.textContent = '—';
+    if (isZoomed) toggleZoom();
   }
 
   function calculateTargetDimensions() {
@@ -169,10 +188,10 @@
     const minEdge = Math.min(origW, origH);
     let scale = 1;
 
-    // Wink Quality Restoration Behavior:
-    // If original is <= 720p / 1280p (mobile video frame / reel snapshot): 4x upscale (up to 2880x5120)
-    // If original is <= 1440p / 2560p: 2x upscale
-    // Max long edge capped at 5120px, max short edge capped at 2880px to match Wink 5K/4K max bounds
+    // Wink Quality Restoration Target:
+    // If original is <= 720p or 1280p (mobile photo / video snapshot): 4x upscale (up to 2880x5120)
+    // If original is <= 1440p or 2560p: 2x upscale
+    // Max long edge capped at 5120px, max short edge capped at 2880px to match Wink 5K/4K max envelope
     if (maxEdge <= 1280 || minEdge <= 720) {
       scale = 4;
     } else if (maxEdge <= 2560 || minEdge <= 1440) {
@@ -263,21 +282,37 @@
   holdBtn.addEventListener('pointerup', restoreSplit);
   holdBtn.addEventListener('pointerleave', restoreSplit);
 
+  // Zoom 2x Toggle Button
+  function toggleZoom() {
+    isZoomed = !isZoomed;
+    compareStage.classList.toggle('pe-zoomed', isZoomed);
+    zoomBtn.classList.toggle('active', isZoomed);
+    applyI18n();
+  }
+  if (zoomBtn) {
+    zoomBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      toggleZoom();
+    });
+  }
+
   /* ── Core Wink Bypass Quality Restoration Pipeline ─────── */
   function renderPreview() {
     if (!sourceImg || !previewW || !previewH) return;
-    // Draw original
+    ctxEnhanced.imageSmoothingEnabled = true;
+    ctxEnhanced.imageSmoothingQuality = 'high';
     ctxEnhanced.drawImage(sourceImg, 0, 0, previewW, previewH);
     applyWinkBypassPipeline(ctxEnhanced, previewW, previewH);
   }
 
   /**
    * Wink Bypass Quality Restoration Engine
-   * 1. Luminance Separation (YCbCr): separates details from chroma, avoiding color fringing
-   * 2. Dynamic Shadow Recovery: lifts crushed blacks (+3..+6 offset with smooth toe gamma)
-   * 3. Multi-Scale Frequency Decomposition: separates micro-textures (water drops, text, leaves)
-   * 4. Edge-Preserving Coring & Denoise: bilateral smoothing on flat skies/walls, crisp edge boost
-   * 5. Micro-Contrast Pop: enhances local midtones without oversaturation
+   * 1. YCbCr Separation + Dynamic Shadow Recovery
+   * 2. Chroma Denoising: eliminates purple/green grain blotches in dark regions
+   * 3. Bilateral Surface Denoising on Y: Range-aware Gaussian weighting produces
+   *    crystal-smooth skin, walls, paper, and sky without destroying true edges
+   * 4. Directional Gradient-Masked Shock Sharpening: only sharpens true edges (G > 3.5),
+   *    leaving flat surfaces 100% glass-smooth and noise-free
    */
   function applyWinkBypassPipeline(targetCtx, w, h) {
     const imgData = targetCtx.getImageData(0, 0, w, h);
@@ -294,78 +329,92 @@
       const g = data[i + 1];
       const b = data[i + 2];
 
-      // Luminance Y
       let yVal = 0.299 * r + 0.587 * g + 0.114 * b;
       Cb[p] = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
       Cr[p] = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
 
-      // Dynamic Shadow Recovery (Wink curve: lift deep blacks so dark books/room have rich detail)
-      if (yVal < 42) {
-        yVal += (42 - yVal) * 0.20; // soft toe lift
+      // Dynamic Shadow Lift (toe lift + gentle gamma)
+      if (yVal < 45) {
+        yVal += (45 - yVal) * 0.22;
       }
-      if (yVal < 170) {
-        // Gentle shadow & midtone gamma lift (curve 0.93)
-        yVal = 255 * Math.pow(yVal / 255, 0.93);
-      } else if (yVal > 220) {
-        // Soft knee highlight roll-off
-        const over = yVal - 220;
-        yVal = 220 + over * 0.85;
+      if (yVal < 185) {
+        yVal = 255 * Math.pow(yVal / 255, 0.92);
+      } else if (yVal > 225) {
+        const over = yVal - 225;
+        yVal = 225 + over * 0.85;
       }
 
       Y[p] = yVal;
     }
 
-    // 2. Multi-Scale Gaussian Approximations on Y
-    // Pass 1: Fine micro-detail radius (~1-2 px)
-    const r1 = Math.max(1, Math.round(Math.min(w, h) * 0.0022));
-    const blur1 = fastSeparableBoxBlur(Y, w, h, r1);
+    // 2. Chroma Denoising (3px blur on Cb & Cr to eliminate color grain)
+    const Cb_clean = fastSeparableBoxBlur(Cb, w, h, 2);
+    const Cr_clean = fastSeparableBoxBlur(Cr, w, h, 2);
 
-    // Pass 2: Medium structure radius (~3-5 px)
-    const r2 = Math.max(2, Math.round(Math.min(w, h) * 0.0055));
-    const blur2 = fastSeparableBoxBlur(blur1, w, h, r2);
+    // 3. Bilateral Surface Smoothing on Luminance Y
+    // Base surface blur (radius ~3-4 px depending on dimensions)
+    const rSurface = Math.max(2, Math.round(Math.min(w, h) * 0.0035));
+    const yBlur = fastSeparableBoxBlur(Y, w, h, rSurface);
 
-    // 3. Multi-Scale Frequency Reconstruction & Edge-Preserving Denoise
+    const Y_smooth = new Float32Array(totalPixels);
+    for (let p = 0; p < totalPixels; p++) {
+      const orig = Y[p];
+      const blur = yBlur[p];
+      const diff = Math.min(255, Math.abs(Math.round(orig - blur)));
+      // Range weight from precomputed LUT: close colors get smoothed; strong edges preserved
+      const weight = RANGE_LUT[diff];
+      Y_smooth[p] = orig * (1 - weight) + blur * weight;
+    }
+
+    // 4. Directional Gradient-Masked Edge Sharpening (Shock Filter)
+    // High-frequency detail from fine blur
+    const yFine = fastSeparableBoxBlur(Y, w, h, 1);
+    const Y_final = new Float32Array(totalPixels);
+
+    for (let y = 0; y < h; y++) {
+      const yw = y * w;
+      const ym1 = Math.max(0, y - 1) * w;
+      const yp1 = Math.min(h - 1, y + 1) * w;
+
+      for (let x = 0; x < w; x++) {
+        const p = yw + x;
+        const xm1 = yw + Math.max(0, x - 1);
+        const xp1 = yw + Math.min(w - 1, x + 1);
+
+        // Compute local gradient magnitude G
+        const gx = (Y_smooth[xp1] - Y_smooth[xm1]) * 0.5;
+        const gy = (Y_smooth[yp1 + x] - Y_smooth[ym1 + x]) * 0.5;
+        const grad = Math.sqrt(gx * gx + gy * gy);
+
+        // Unsharp difference
+        const lap = Y[p] - yFine[p];
+
+        // Mask: only sharpen when grad > 3.5 (real contours, text, water droplets, lines)
+        // If grad <= 3.5, edgeMask = 0 -> FLAT SURFACES STAY 100% SILKY SMOOTH!
+        const edgeMask = clamp((grad - 3.5) / 8.0, 0, 1);
+        const lapBoost = clamp(lap * 1.75, -28, 28) * edgeMask;
+
+        let yRes = Y_smooth[p] + lapBoost;
+
+        // Subtle midtone contrast punch
+        if (yRes > 70 && yRes < 190) {
+          const mid = (yRes - 128) / 60;
+          yRes += mid * 3.5;
+        }
+
+        Y_final[p] = clamp(yRes, 0, 255);
+      }
+    }
+
+    // 5. YCbCr -> RGB conversion
     for (let p = 0, i = 0; p < totalPixels; p++, i += 4) {
-      const yOrig = Y[p];
-      const b1 = blur1[p];
-      const b2 = blur2[p];
+      const yF = Y_final[p];
+      const cbF = Cb_clean[p] - 128;
+      const crF = Cr_clean[p] - 128;
 
-      // Frequency bands
-      const h1 = yOrig - b1; // Fine micro-texture (raindrops, handwriting, petals)
-      const h2 = b1 - b2;    // Mid-frequency edge contour
-
-      const absH1 = Math.abs(h1);
-      let yRestored = yOrig;
-
-      if (absH1 < 2.6) {
-        // Flat/smooth region (sky, plain walls): apply bilateral smoothing to clear JPEG noise
-        const smoothBlend = 0.65;
-        yRestored = yOrig * (1 - smoothBlend) + b1 * smoothBlend;
-      } else {
-        // Edge / texture region: reconstruct crisp details with soft saturation limit
-        const h1Boost = clamp(h1 * 1.48, -32, 32);
-        const h2Boost = clamp(h2 * 0.62, -20, 20);
-        yRestored = yOrig + h1Boost + h2Boost;
-      }
-
-      // Micro-contrast clarity pop in midtones (Wink punch)
-      if (yRestored > 70 && yRestored < 190) {
-        const midNorm = (yRestored - 128) / 60;
-        yRestored += midNorm * 4.5;
-      }
-
-      // 4. YCbCr -> RGB conversion
-      const yF = clamp(yRestored, 0, 255);
-      const cbF = Cb[p] - 128;
-      const crF = Cr[p] - 128;
-
-      const rOut = yF + 1.402 * crF;
-      const gOut = yF - 0.344136 * cbF - 0.714136 * crF;
-      const bOut = yF + 1.772 * cbF;
-
-      data[i]     = clamp(rOut);
-      data[i + 1] = clamp(gOut);
-      data[i + 2] = clamp(bOut);
+      data[i]     = clamp(yF + 1.402 * crF);
+      data[i + 1] = clamp(yF - 0.344136 * cbF - 0.714136 * crF);
+      data[i + 2] = clamp(yF + 1.772 * cbF);
     }
 
     targetCtx.putImageData(imgData, 0, 0);
@@ -412,65 +461,40 @@
     const buf = new Uint8Array(192);
     const view = new DataView(buf.buffer);
 
-    // Marker FFE1, len 190
     view.setUint16(0, 0xFFE1);
     view.setUint16(2, 190);
-
-    // 'Exif\0\0'
     buf.set([0x45, 0x78, 0x69, 0x66, 0x00, 0x00], 4);
-
-    // TIFF Header: 'MM\0*' (big endian), IFD0 offset 8
     buf.set([0x4D, 0x4D, 0x00, 0x2A], 10);
     view.setUint32(14, 8);
 
-    // IFD0 at offset 18 (10 + 8) -> 5 entries
+    // IFD0: 5 entries
     view.setUint16(18, 5);
     let pos = 20;
-
-    // 1: ImageWidth (0x0100) LONG 1
     view.setUint16(pos, 0x0100); view.setUint16(pos+2, 4); view.setUint32(pos+4, 1); view.setUint32(pos+8, width); pos += 12;
-    // 2: ImageHeight (0x0101) LONG 1
     view.setUint16(pos, 0x0101); view.setUint16(pos+2, 4); view.setUint32(pos+4, 1); view.setUint32(pos+8, height); pos += 12;
-    // 3: ExifSubIFD (0x8769) LONG 1 offset 0x5E (94)
     view.setUint16(pos, 0x8769); view.setUint16(pos+2, 4); view.setUint32(pos+4, 1); view.setUint32(pos+8, 0x5E); pos += 12;
-    // 4: Orientation (0x0112) LONG 1 val 0
     view.setUint16(pos, 0x0112); view.setUint16(pos+2, 4); view.setUint32(pos+4, 1); view.setUint32(pos+8, 0); pos += 12;
-    // 5: DateTime (0x0132) ASCII 20 offset 0x4A (74)
     view.setUint16(pos, 0x0132); view.setUint16(pos+2, 2); view.setUint32(pos+4, 20); view.setUint32(pos+8, 0x4A); pos += 12;
     view.setUint32(pos, 0); pos += 4;
 
-    // Write DateTime string at offset 10 + 0x4A = 84
-    for (let i = 0; i < dateStr.length && i < 19; i++) {
-      buf[84 + i] = dateStr.charCodeAt(i);
-    }
+    for (let i = 0; i < dateStr.length && i < 19; i++) buf[84 + i] = dateStr.charCodeAt(i);
     buf[84 + Math.min(dateStr.length, 19)] = 0;
 
-    // SubIFD at offset 10 + 0x5E = 104 -> 2 entries
     pos = 104;
     view.setUint16(pos, 2); pos += 2;
-    // 1: DateTimeOriginal (0x9003) ASCII 20 offset 0x7C (124)
     view.setUint16(pos, 0x9003); view.setUint16(pos+2, 2); view.setUint32(pos+4, 20); view.setUint32(pos+8, 0x7C); pos += 12;
-    // 2: LightSource (0x9208) LONG 1 val 0
     view.setUint16(pos, 0x9208); view.setUint16(pos+2, 4); view.setUint32(pos+4, 1); view.setUint32(pos+8, 0); pos += 12;
     view.setUint32(pos, 0);
 
-    // Write DateTimeOriginal string at offset 10 + 0x7C = 134
-    for (let i = 0; i < dateStr.length && i < 19; i++) {
-      buf[134 + i] = dateStr.charCodeAt(i);
-    }
+    for (let i = 0; i < dateStr.length && i < 19; i++) buf[134 + i] = dateStr.charCodeAt(i);
     buf[134 + Math.min(dateStr.length, 19)] = 0;
 
-    // IFD1 at offset 10 + 0x90 = 154 -> 1 entry
     pos = 154;
     view.setUint16(pos, 1); pos += 2;
-    // 1: DateTime (0x0132) ASCII 20 offset 0xA2 (162)
     view.setUint16(pos, 0x0132); view.setUint16(pos+2, 2); view.setUint32(pos+4, 20); view.setUint32(pos+8, 0xA2); pos += 12;
     view.setUint32(pos, 0);
 
-    // Write DateTime string at offset 10 + 0xA2 = 172
-    for (let i = 0; i < dateStr.length && i < 19; i++) {
-      buf[172 + i] = dateStr.charCodeAt(i);
-    }
+    for (let i = 0; i < dateStr.length && i < 19; i++) buf[172 + i] = dateStr.charCodeAt(i);
     buf[172 + Math.min(dateStr.length, 19)] = 0;
 
     return buf;
@@ -520,7 +544,7 @@
 
     renderFill.style.width = '60%';
     renderPct.textContent = '60%';
-    renderStatus.textContent = text('Menerapkan rekonstruksi frekuensi & shadow recovery…', 'Applying frequency reconstruction & shadow recovery…');
+    renderStatus.textContent = text('Menerapkan bilateral surface smoothing & edge shock filter…', 'Applying bilateral surface smoothing & edge shock filter…');
 
     await new Promise(r => setTimeout(r, 60));
 
@@ -532,7 +556,7 @@
     offCtx.imageSmoothingQuality = 'high';
     offCtx.drawImage(intermediateImg, 0, 0, outW, outH);
 
-    // Apply the full Wink Bypass restoration pipeline
+    // Apply the full Wink Bypass restoration pipeline at 4K Ultra HD
     applyWinkBypassPipeline(offCtx, outW, outH);
 
     renderFill.style.width = '85%';
@@ -555,12 +579,9 @@
       const timestamp = getFormattedTimestamp();
       const winkExif = createWinkApp1Exif(outW, outH, timestamp);
 
-      // Verify JPEG SOI (FF D8)
       let finalBytes = rawBytes;
       if (rawBytes[0] === 0xFF && rawBytes[1] === 0xD8) {
-        // Find position of first marker after SOI
         let pos = 2;
-        // If an APP1 already exists in browser JPEG, replace it; otherwise insert after SOI
         if (rawBytes[pos] === 0xFF && rawBytes[pos + 1] === 0xE1) {
           const app1Len = (rawBytes[pos + 2] << 8) | rawBytes[pos + 3];
           const rest = rawBytes.subarray(pos + 2 + app1Len);
@@ -570,7 +591,6 @@
           combined.set(rest, 2 + winkExif.length);
           finalBytes = combined;
         } else {
-          // Prepend Wink EXIF right after SOI
           const rest = rawBytes.subarray(2);
           const combined = new Uint8Array(2 + winkExif.length + rest.length);
           combined[0] = 0xFF; combined[1] = 0xD8;

@@ -143,6 +143,11 @@
   overflow:hidden;
   box-shadow:0 12px 36px rgba(0,0,0,.65);
   --pe-split:50%;
+  transition:transform .24s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin:center center;
+}
+.pe-compare-stage.pe-zoomed{
+  transform:scale(2.1);
 }
 .pe-canvas-layer{
   display:block;
@@ -233,6 +238,11 @@
   color:#828ba8;
   font-size:11.5px;
 }
+.pe-hint-actions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
 .pe-hold-orig-btn{
   background:rgba(255,255,255,.06);
   border:1px solid rgba(255,255,255,.12);
@@ -245,6 +255,12 @@
   transition:.15s;
 }
 .pe-hold-orig-btn:hover{background:rgba(255,255,255,.12);color:#fff}
+.pe-hold-orig-btn.active{
+  background:rgba(170,140,255,.2);
+  border-color:#aa8cff;
+  color:#fff;
+  box-shadow:0 0 10px rgba(170,140,255,.4);
+}
 
 /* Control Panel */
 .pe-panel{
