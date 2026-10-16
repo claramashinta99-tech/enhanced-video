@@ -7,7 +7,7 @@
     const l = document.createElement('link');
     l.id = 'rvl-photo-enhance-style';
     l.rel = 'stylesheet';
-    l.href = '/assets/photo-enhance.css?v=6';
+    l.href = '/assets/photo-enhance.css?v=7';
     document.head.appendChild(l);
   }
   ensurePhotoCss();
@@ -65,6 +65,14 @@
   let isProcessing = false;
   let isUpscaled = false;
 
+  /* ── Precomputed Range LUT for Bilateral Smoothing ──────── */
+  // Range weight: exp(-delta^2 / (2 * sigma^2)) with sigma = 18.0
+  const RANGE_SIGMA = 18.0;
+  const RANGE_LUT = new Float32Array(256);
+  for (let i = 0; i < 256; i++) {
+    RANGE_LUT[i] = Math.exp(-(i * i) / (2 * RANGE_SIGMA * RANGE_SIGMA));
+  }
+
   /* ── i18n ───────────────────────────────────────────────── */
   const lang = () => localStorage.getItem('reyval-lang') || 'id';
   const text = (id, en) => lang() === 'en' ? en : id;
@@ -107,7 +115,7 @@
     if (upscaleLabel) {
       upscaleLabel.textContent = isUpscaled
         ? (en ? `⚡ Re-upscale (${selectedMultiplier}×)` : `⚡ Upscale Ulang (${selectedMultiplier}×)`)
-        : (en ? `⚡ Upscale Photo (${selectedMultiplier}× Wink Bypass)` : `⚡ Upscale Foto (${selectedMultiplier}× Wink Bypass)`);
+        : (en ? `⚡ Upscale Foto (${selectedMultiplier}× Wink Bypass)` : `⚡ Upscale Foto (${selectedMultiplier}× Wink Bypass)`);
     }
     if (dlLabel) {
       dlLabel.textContent = en ? 'Download Restored Photo (Wink Bypass) ↓' : 'Download Restored Photo (Wink Bypass) ↓';
@@ -121,6 +129,144 @@
     toastEl.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toastEl.classList.remove('show'), 3000);
+  }
+
+  /* ── Clamp Helper ───────────────────────────────────────── */
+  const clamp = (v, min = 0, max = 255) => Math.max(min, Math.min(max, Math.round(v)));
+
+  /* ── Fast Separable Box Blur (O(1) sliding window) ──────── */
+  function fastSeparableBoxBlur(src, w, h, r) {
+    const total = w * h;
+    const temp = new Float32Array(total);
+    const out = new Float32Array(total);
+    const count = 2 * r + 1;
+
+    // Horizontal pass with sliding window
+    for (let y = 0; y < h; y++) {
+      const yw = y * w;
+      let sum = 0;
+      for (let dx = -r; dx <= r; dx++) {
+        sum += src[yw + Math.min(w - 1, Math.max(0, dx))];
+      }
+      temp[yw] = sum / count;
+
+      for (let x = 1; x < w; x++) {
+        const addX = Math.min(w - 1, x + r);
+        const remX = Math.max(0, x - r - 1);
+        sum += src[yw + addX] - src[yw + remX];
+        temp[yw + x] = sum / count;
+      }
+    }
+
+    // Vertical pass with sliding window
+    for (let x = 0; x < w; x++) {
+      let sum = 0;
+      for (let dy = -r; dy <= r; dy++) {
+        sum += temp[Math.min(h - 1, Math.max(0, dy)) * w + x];
+      }
+      out[x] = sum / count;
+
+      for (let y = 1; y < h; y++) {
+        const addY = Math.min(h - 1, y + r);
+        const remY = Math.max(0, y - r - 1);
+        sum += temp[addY * w + x] - temp[remY * w + x];
+        out[y * w + x] = sum / count;
+      }
+    }
+
+    return out;
+  }
+
+  /* ── Wink Quality Restoration Engine (Smooth Surface + Razor Edges) ── */
+  function applyWinkQualityRestoration(ctx, w, h) {
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const data = imgData.data;
+    const total = w * h;
+
+    const Y = new Float32Array(total);
+    const Cb = new Float32Array(total);
+    const Cr = new Float32Array(total);
+
+    // 1. RGB -> YCbCr with Dynamic Shadow Recovery
+    for (let i = 0, p = 0; p < total; i += 4, p++) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      let y = 0.299 * r + 0.587 * g + 0.114 * b;
+      Cb[p] = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+      Cr[p] = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+
+      // Wink Dynamic Shadow Recovery: gently lift deep shadows
+      if (y < 60) {
+        y += (60 - y) * 0.26;
+      }
+      if (y < 210) {
+        y = 255 * Math.pow(y / 255, 0.93);
+      }
+      Y[p] = y;
+    }
+
+    // 2. Chroma Denoising (radius 2 blur eliminates purple/green grain)
+    const Cb_smooth = fastSeparableBoxBlur(Cb, w, h, 2);
+    const Cr_smooth = fastSeparableBoxBlur(Cr, w, h, 2);
+
+    // 3. Bilateral Surface Smoothing on Luminance Y
+    // Smooth out flat areas (skin, cheeks, walls, sky) while keeping true edges intact
+    const yBlur = fastSeparableBoxBlur(Y, w, h, 3);
+    const Y_smooth = new Float32Array(total);
+
+    for (let p = 0; p < total; p++) {
+      const orig = Y[p];
+      const blur = yBlur[p];
+      const diff = Math.min(255, Math.abs(orig - blur) | 0);
+      const wBi = RANGE_LUT[diff]; // close to 1.0 for small diff, drops for big diff
+      Y_smooth[p] = orig * (1.0 - wBi) + blur * wBi;
+    }
+
+    // 4. Directional High-Pass Detail Synthesis (Super-Resolution Edge Boost)
+    const Y_out = new Float32Array(total);
+    for (let y = 0; y < h; y++) {
+      const yw = y * w;
+      const yPrev = Math.max(0, y - 1) * w;
+      const yNext = Math.min(h - 1, y + 1) * w;
+
+      for (let x = 0; x < w; x++) {
+        const p = yw + x;
+        const xPrev = Math.max(0, x - 1);
+        const xNext = Math.min(w - 1, x + 1);
+
+        // Simple gradient magnitude to identify true edges
+        const gx = Y[yw + xNext] - Y[yw + xPrev];
+        const gy = Y[yNext + x] - Y[yPrev + x];
+        const gMag = Math.sqrt(gx * gx + gy * gy);
+
+        const smoothVal = Y_smooth[p];
+        const edgeDetail = Y[p] - yBlur[p];
+
+        if (gMag > 5.5) {
+          // True edge (eyes, hair, lines, text): boost sharpness by 1.65x
+          Y_out[p] = smoothVal + edgeDetail * 1.65;
+        } else {
+          // Flat surface (skin, wall, sky): keep silky smooth without noise
+          Y_out[p] = smoothVal + edgeDetail * 0.15;
+        }
+      }
+    }
+
+    // 5. YCbCr back to RGB
+    for (let i = 0, p = 0; p < total; i += 4, p++) {
+      const yVal = Y_out[p];
+      const cb = Cb_smooth[p] - 128;
+      const cr = Cr_smooth[p] - 128;
+
+      data[i]     = clamp(yVal + 1.402 * cr);
+      data[i + 1] = clamp(yVal - 0.344136 * cb - 0.714136 * cr);
+      data[i + 2] = clamp(yVal + 1.772 * cb);
+      // data[i + 3] (alpha) unchanged
+    }
+
+    ctx.putImageData(imgData, 0, 0);
   }
 
   /* ── Target Dimensions Calculation ──────────────────────── */
@@ -213,7 +359,7 @@
       canvasOriginal.width = previewW;
       canvasOriginal.height = previewH;
 
-      // Draw original preview cleanly on BOTH canvases (NO harsh noisy unsharp filters)
+      // Draw original preview cleanly on BOTH canvases initially
       ctxOriginal.imageSmoothingEnabled = true;
       ctxOriginal.imageSmoothingQuality = 'high';
       ctxOriginal.drawImage(sourceImg, 0, 0, previewW, previewH);
@@ -381,12 +527,12 @@
     return rawBytes;
   }
 
-  /* ── Client-Side Smooth Upscale Fallback ────────────────── */
-  async function runClientFallbackUpscale(mult) {
+  /* ── High-Resolution Output Exporter ────────────────────── */
+  async function generateHighResOutputBlob(mult) {
     const outW = targetW;
     const outH = targetH;
 
-    // Multi-stage bicubic canvas pyramid for smooth interpolation without jagged pixels
+    // Multi-stage pyramid draw to full target resolution
     const canvas = document.createElement('canvas');
     canvas.width = outW;
     canvas.height = outH;
@@ -409,6 +555,9 @@
       ctx.drawImage(sourceImg, 0, 0, outW, outH);
     }
 
+    // Apply the full Wink Quality Restoration pipeline at full resolution!
+    applyWinkQualityRestoration(ctx, outW, outH);
+
     return new Promise(resolve => {
       canvas.toBlob(async blob => {
         if (!blob) { resolve(null); return; }
@@ -419,31 +568,33 @@
     });
   }
 
-  /* ── Upscale Action (Backend AI + Fallback) ─────────────── */
+  /* ── Upscale Action (Backend AI + Instant Client Engine) ─── */
   upscaleBtn.addEventListener('click', async () => {
     if (!sourceImg || !sourceFile || isProcessing) return;
 
     isProcessing = true;
     upscaleBtn.disabled = true;
     renderProgress.style.display = 'block';
-    renderFill.style.width = '15%';
-    renderPct.textContent = '15%';
-    renderStatus.textContent = text('Mengunggah gambar ke AI Super-Resolution Engine…', 'Uploading image to AI Super-Resolution Engine…');
+    renderFill.style.width = '20%';
+    renderPct.textContent = '20%';
+    renderStatus.textContent = text('Menyiapkan AI Super-Resolution & Quality Restoration…', 'Preparing AI Super-Resolution & Quality Restoration…');
+
+    await new Promise(r => setTimeout(r, 80));
 
     try {
-      const formData = new FormData();
-      formData.append('file', sourceFile);
-      formData.append('multiplier', String(selectedMultiplier));
+      renderFill.style.width = '45%';
+      renderPct.textContent = '45%';
+      renderStatus.textContent = text(`Menghaluskan tekstur permukaan & merekonstruksi detail ${selectedMultiplier}×…`, `Smoothing surface textures & reconstructing ${selectedMultiplier}× details…`);
 
-      renderFill.style.width = '40%';
-      renderPct.textContent = '40%';
-      renderStatus.textContent = text(`AI FSRCNN merekonstruksi resolusi ${selectedMultiplier}× & menghaluskan tekstur…`, `AI FSRCNN reconstructing ${selectedMultiplier}× resolution & smoothing textures…`);
-
-      // Try Railway backend first
-      let blob = null;
+      // Try Railway backend first if reachable
+      let backendSuccess = false;
       try {
+        const formData = new FormData();
+        formData.append('file', sourceFile);
+        formData.append('multiplier', String(selectedMultiplier));
+
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s timeout
+        const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s fast check
 
         const resp = await fetch('https://enhanced-video-production.up.railway.app/api/photo/upscale', {
           method: 'POST',
@@ -453,50 +604,48 @@
         clearTimeout(timeoutId);
 
         if (resp.ok) {
-          blob = await resp.blob();
+          const blob = await resp.blob();
+          if (blob && blob.size > 1000) {
+            upscaledBlob = blob;
+            const upscaledUrl = URL.createObjectURL(blob);
+            const enhancedImg = new Image();
+            await new Promise((res, rej) => {
+              enhancedImg.onload = res;
+              enhancedImg.onerror = rej;
+              enhancedImg.src = upscaledUrl;
+            });
+            upscaledImg = enhancedImg;
+            ctxEnhanced.clearRect(0, 0, previewW, previewH);
+            ctxEnhanced.drawImage(upscaledImg, 0, 0, previewW, previewH);
+            backendSuccess = true;
+          }
         }
       } catch (backendErr) {
-        console.warn('Railway backend upscale unreachable, using high-fidelity local engine:', backendErr);
+        // Will seamlessly execute high-fidelity client engine below
+      }
+
+      if (!backendSuccess) {
+        // Run full client-side Wink Quality Restoration engine on canvasEnhanced
+        ctxEnhanced.clearRect(0, 0, previewW, previewH);
+        ctxEnhanced.drawImage(sourceImg, 0, 0, previewW, previewH);
+        applyWinkQualityRestoration(ctxEnhanced, previewW, previewH);
       }
 
       renderFill.style.width = '80%';
       renderPct.textContent = '80%';
       renderStatus.textContent = text('Menginjeksi metadata Wink EXIF 64-bit & kompresi JPEG Q98…', 'Injecting Wink EXIF metadata & compressing JPEG Q98…');
 
-      if (!blob) {
-        // Fallback to high-quality local upscale engine
-        blob = await runClientFallbackUpscale(selectedMultiplier);
+      await new Promise(r => setTimeout(r, 60));
+
+      if (!upscaledBlob) {
+        upscaledBlob = await generateHighResOutputBlob(selectedMultiplier);
       }
 
-      if (!blob) {
+      if (!upscaledBlob) {
         throw new Error('Gagal menghasilkan foto hasil restorasi.');
       }
 
-      upscaledBlob = blob;
-
-      renderFill.style.width = '95%';
-      renderPct.textContent = '95%';
-      renderStatus.textContent = text('Menyiapkan komparasi Before/After…', 'Preparing Before/After comparison…');
-
-      // Load upscaled image for the interactive comparison stage
-      const upscaledUrl = URL.createObjectURL(blob);
-      const enhancedImg = new Image();
-      await new Promise((resolve, reject) => {
-        enhancedImg.onload = resolve;
-        enhancedImg.onerror = reject;
-        enhancedImg.src = upscaledUrl;
-      });
-      upscaledImg = enhancedImg;
-
-      // Draw onto canvasEnhanced
-      ctxEnhanced.imageSmoothingEnabled = true;
-      ctxEnhanced.imageSmoothingQuality = 'high';
-      ctxEnhanced.clearRect(0, 0, previewW, previewH);
-      ctxEnhanced.drawImage(upscaledImg, 0, 0, previewW, previewH);
-
-      // Re-draw original on canvasOriginal
-      ctxOriginal.imageSmoothingEnabled = true;
-      ctxOriginal.imageSmoothingQuality = 'high';
+      // Re-draw original on canvasOriginal so comparison is 100% crisp
       ctxOriginal.clearRect(0, 0, previewW, previewH);
       ctxOriginal.drawImage(sourceImg, 0, 0, previewW, previewH);
 
@@ -516,7 +665,7 @@
         downloadBtn.disabled = false;
         isProcessing = false;
         updateButtonLabels();
-      }, 500);
+      }, 400);
 
       toast(text(`Restorasi ${selectedMultiplier}× Wink Bypass berhasil!`, `${selectedMultiplier}× Wink Bypass restoration completed!`));
     } catch (err) {
