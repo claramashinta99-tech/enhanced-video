@@ -175,7 +175,7 @@
     return out;
   }
 
-  /* ── Wink Quality Restoration Engine (HD, Jernih, Smooth) ── */
+  /* ── Wink Quality Restoration Engine (HD, Jernih, Smooth, ZERO Vignette) ── */
   function applyWinkQualityRestoration(ctx, w, h) {
     const imgData = ctx.getImageData(0, 0, w, h);
     const data = imgData.data;
@@ -185,34 +185,22 @@
     const Cb = new Float32Array(total);
     const Cr = new Float32Array(total);
 
-    // 1. RGB -> YCbCr with Dynamic Shadow Recovery & Clarity Tone Mapping
+    // 1. RGB -> YCbCr (Pure linear transform: NO non-linear shadow curves, NO vignette)
     for (let i = 0, p = 0; p < total; i += 4, p++) {
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
 
-      let yVal = 0.299 * r + 0.587 * g + 0.114 * b;
+      Y[p] = 0.299 * r + 0.587 * g + 0.114 * b;
       Cb[p] = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
       Cr[p] = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
-
-      // Dynamic Shadow Recovery: lift muddy dark tones (up to +28 lift in deep shadows)
-      if (yVal < 110) {
-        const t = (110 - yVal) / 110;
-        yVal += Math.pow(t, 1.6) * 28.0;
-      }
-      // Micro-contrast gamma for crisp transparency ("jernih")
-      if (yVal < 220) {
-        yVal = 255.0 * Math.pow(yVal / 255.0, 0.94);
-      }
-      Y[p] = yVal;
     }
 
-    // 2. Chroma Denoising (radius 2 blur eliminates color noise blotches)
+    // 2. Chroma Denoising (radius 2 blur eliminates chroma speckles without changing luma)
     const Cb_blur = fastSeparableBoxBlur(Cb, w, h, 2);
     const Cr_blur = fastSeparableBoxBlur(Cr, w, h, 2);
 
-    // 3. Bilateral Surface Denoising on Luminance Y
-    // Smooths flat areas (skin, cheeks, walls, sky) to porcelain finish
+    // 3. Bilateral Surface Denoising on Luminance Y (radius 3)
     const yBlur = fastSeparableBoxBlur(Y, w, h, 3);
     const Y_smooth = new Float32Array(total);
 
@@ -224,30 +212,32 @@
       Y_smooth[p] = orig * (1.0 - wBi) + blur * wBi;
     }
 
-    // 4. Directional High-Pass Detail Synthesis (Super-Resolution Edge Boost)
+    // 4. Smooth continuous high-pass detail synthesis (Zero vignette, zero threshold banding)
     const Y_final = new Float32Array(total);
     for (let p = 0; p < total; p++) {
       const edge = Y[p] - yBlur[p];
       const absEdge = Math.abs(edge);
 
-      if (absEdge > 3.0) {
-        // True edge / detail (eyes, hair, lines, text): boost by 1.7x for HD clarity
-        Y_final[p] = Y_smooth[p] + edge * 1.7;
-      } else {
-        // Flat surface: eliminate noise & grain for silky smooth texture
-        Y_final[p] = Y_smooth[p] + edge * 0.12;
-      }
+      // Smoothstep transition between noise (absEdge < 3) and true edges (absEdge > 7)
+      let t = (absEdge - 3.0) / 4.0;
+      if (t < 0) t = 0;
+      else if (t > 1) t = 1;
+      const smoothT = t * t * (3.0 - 2.0 * t);
+      const weight = 0.15 * (1.0 - smoothT) + 1.65 * smoothT;
+
+      Y_final[p] = Y_smooth[p] + edge * weight;
     }
 
-    // 5. Subtle Color Vibrance Pop (+8% chroma clarity)
+    // 5. YCbCr back to RGB (Linear, 100% natural color balance)
     for (let i = 0, p = 0; p < total; i += 4, p++) {
       const yVal = Y_final[p];
-      const cb = 128 + (Cb_blur[p] - 128) * 1.08;
-      const cr = 128 + (Cr_blur[p] - 128) * 1.08;
+      const cb = Cb_blur[p] - 128;
+      const cr = Cr_blur[p] - 128;
 
-      data[i]     = clamp(yVal + 1.402 * (cr - 128));
-      data[i + 1] = clamp(yVal - 0.344136 * (cb - 128) - 0.714136 * (cr - 128));
-      data[i + 2] = clamp(yVal + 1.772 * (cb - 128));
+      data[i]     = clamp(yVal + 1.402 * cr);
+      data[i + 1] = clamp(yVal - 0.344136 * cb - 0.714136 * cr);
+      data[i + 2] = clamp(yVal + 1.772 * cb);
+      // data[i + 3] (alpha) unchanged
     }
 
     ctx.putImageData(imgData, 0, 0);

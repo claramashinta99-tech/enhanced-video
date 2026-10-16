@@ -1,4 +1,5 @@
 /* Photo Enhance — RVL HD Pure Enhance, Smoothing, & Upscale */
+.rvl-ambient-vignette, .rvl-ambient-bg{display:none!important}
 .pe-wrap{max-width:1120px;margin:0 auto;padding-bottom:50px}
 
 /* Drop area */
