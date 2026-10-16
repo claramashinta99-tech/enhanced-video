@@ -348,6 +348,55 @@
   line-height:1.45;
 }
 
+/* Multiplier selector (iLoveIMG style) */
+.pe-multiplier-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin:10px 0 16px;
+}
+.pe-mult-btn{
+  background:#161c30;
+  border:1.5px solid rgba(255,255,255,.09);
+  border-radius:14px;
+  padding:14px 12px;
+  text-align:center;
+  cursor:pointer;
+  transition:all .18s cubic-bezier(0.16, 1, 0.3, 1);
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:4px;
+  position:relative;
+}
+.pe-mult-btn:hover{
+  border-color:rgba(170,140,255,.35);
+  background:#1b223b;
+  transform:translateY(-1px);
+}
+.pe-mult-btn.active{
+  background:linear-gradient(135deg,rgba(125,95,255,.2),rgba(170,140,255,.08));
+  border-color:#aa8cff;
+  box-shadow:0 0 18px rgba(170,140,255,.25), inset 0 0 12px rgba(170,140,255,.12);
+}
+.pe-mult-val{
+  font-size:18px;
+  font-weight:800;
+  color:#f2f5fd;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+.pe-mult-btn.active .pe-mult-val{
+  color:#c7b3ff;
+}
+.pe-mult-sub{
+  font-size:11px;
+  color:#828ba8;
+  font-weight:550;
+}
+.pe-mult-btn.active .pe-mult-sub{
+  color:#e4e9f7;
+}
+
 /* Resolution Information Card */
 .pe-res-card{
   display:grid;
@@ -369,6 +418,10 @@
   color:#72e6b3;
   font-weight:700;
   font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+.pe-res-row.pe-res-target b{
+  color:#aa8cff;
+  font-size:13px;
 }
 
 /* Actions */

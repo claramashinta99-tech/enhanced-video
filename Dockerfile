@@ -19,7 +19,7 @@ RUN git clone --depth 1 --branch 2.0.0 https://github.com/Brainicism/bgutil-ytdl
     && cd /opt/bgutil/server \
     && npm ci \
     && npx tsc
-
+COPY backend/models ./models
 COPY backend/app.py backend/mp3_app.py backend/audio_chunked_app.py backend/diagnostic_app.py backend/shorts_app.py backend/youtube_engine_app.py backend/tiktok_engine_app.py backend/tiktok_hd_app.py backend/social_downloaders_app.py backend/media_inspector_app.py backend/carousel_routes.py backend/photo_enhance_app.py ./
 
 EXPOSE 10000

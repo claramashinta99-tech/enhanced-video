@@ -81,44 +81,24 @@
         </div>
       </div>
 
-      <!-- Wink Bypass Controls Panel -->
+      <!-- Wink Bypass Controls Panel (iLoveIMG Style) -->
       <div class="pe-panel" id="panel-enhance">
         <div class="pe-panel-title">
           <span>Wink Bypass Engine</span>
           <span class="pe-badge-live">QUALITY RESTORATION</span>
         </div>
 
-        <!-- Specifications & Active Restorations -->
-        <div class="pe-group-label" id="pe-features-label">Fitur Restorasi Aktif</div>
-        <div class="pe-spec-list">
-          <div class="pe-spec-item">
-            <div class="pe-spec-icon">💎</div>
-            <div class="pe-spec-info">
-              <b id="spec-detail-title">Multi-Scale Micro-Detail</b>
-              <small id="spec-detail-desc">Rekonstruksi ketajaman tepi, teks, dan tekstur mikro tanpa digital halo.</small>
-            </div>
-          </div>
-          <div class="pe-spec-item">
-            <div class="pe-spec-icon">🌓</div>
-            <div class="pe-spec-info">
-              <b id="spec-shadow-title">Dynamic Shadow Recovery</b>
-              <small id="spec-shadow-desc">Mengangkat detail bayangan gelap dengan kurva halus tanpa crushed blacks.</small>
-            </div>
-          </div>
-          <div class="pe-spec-item">
-            <div class="pe-spec-icon">🛡️</div>
-            <div class="pe-spec-info">
-              <b id="spec-denoise-title">Luminance Bilateral Denoise</b>
-              <small id="spec-denoise-desc">Membersihkan noise &amp; artefak kompresi JPEG tanpa chromatic fringe.</small>
-            </div>
-          </div>
-          <div class="pe-spec-item">
-            <div class="pe-spec-icon">⚡</div>
-            <div class="pe-spec-info">
-              <b id="spec-meta-title">Wink EXIF 64-Bit Injection</b>
-              <small id="spec-meta-desc">Format JPEG Q98 Studio dengan struktur APP1 EXIF asli Wink.</small>
-            </div>
-          </div>
+        <!-- Multiplier Selector (iLoveIMG Style) -->
+        <div class="pe-group-label" id="pe-multiplier-label">FAKTOR UPSCALE (RESOLUTION)</div>
+        <div class="pe-multiplier-grid" role="radiogroup" aria-label="Faktor upscale">
+          <button type="button" class="pe-mult-btn" data-multiplier="2" id="mult-btn-2">
+            <span class="pe-mult-val">2×</span>
+            <span class="pe-mult-sub" id="mult-sub-2">High Definition</span>
+          </button>
+          <button type="button" class="pe-mult-btn active" data-multiplier="4" id="mult-btn-4">
+            <span class="pe-mult-val">4×</span>
+            <span class="pe-mult-sub" id="mult-sub-4">Ultra HD (Wink)</span>
+          </button>
         </div>
 
         <!-- Resolution info -->
@@ -127,15 +107,44 @@
             <span id="lbl-orig-dim">Resolusi Asli:</span>
             <b id="pe-orig-dim">—</b>
           </div>
-          <div class="pe-res-row">
+          <div class="pe-res-row pe-res-target">
             <span id="lbl-target-dim">Target Wink Bypass:</span>
             <b id="pe-out-dim">—</b>
           </div>
         </div>
 
-        <!-- Download Action -->
+        <!-- Specifications & Active Restorations -->
+        <div class="pe-group-label" id="pe-features-label">Fitur Restorasi Aktif</div>
+        <div class="pe-spec-list">
+          <div class="pe-spec-item">
+            <div class="pe-spec-icon">💎</div>
+            <div class="pe-spec-info">
+              <b id="spec-detail-title">Neural Super-Resolution (AI)</b>
+              <small id="spec-detail-desc">Rekonstruksi resolusi dan micro-detail sub-pixel tanpa digital halo atau distorsi.</small>
+            </div>
+          </div>
+          <div class="pe-spec-item">
+            <div class="pe-spec-icon">✨</div>
+            <div class="pe-spec-info">
+              <b id="spec-denoise-title">Bilateral Surface Smoothing</b>
+              <small id="spec-denoise-desc">Membersihkan noise, bintik, &amp; artefak kompresi JPEG agar kulit &amp; bidang datar halus mulus.</small>
+            </div>
+          </div>
+          <div class="pe-spec-item">
+            <div class="pe-spec-icon">⚡</div>
+            <div class="pe-spec-info">
+              <b id="spec-meta-title">Wink EXIF 64-Bit Injection</b>
+              <small id="spec-meta-desc">Format JPEG Q98 Studio dengan struktur APP1 EXIF asli Wink untuk bypass algoritma kompresi.</small>
+            </div>
+          </div>
+        </div>
+
+        <!-- Upscale & Download Actions -->
         <div class="pe-action-box">
-          <button class="btn primary large" id="pe-download-btn" type="button" disabled>
+          <button class="btn primary large" id="pe-upscale-btn" type="button">
+            <span id="pe-upscale-label">⚡ Upscale Foto (Wink Bypass)</span>
+          </button>
+          <button class="btn primary large pe-btn-download" id="pe-download-btn" type="button" style="display:none">
             <span id="pe-dl-label">Download Restored Photo (Wink Bypass) ↓</span>
           </button>
           <div class="pe-sub-actions">
@@ -143,16 +152,16 @@
           </div>
         </div>
 
-        <!-- Progress overlay during export -->
+        <!-- Progress overlay during upscale -->
         <div class="pe-render-progress" id="pe-render-progress" style="display:none">
           <div class="progress-bar"><div class="progress-fill" id="pe-render-fill" style="width:0%"></div></div>
-          <div class="progress-row"><span id="pe-render-status">Memproses restorasi Wink Bypass…</span><span id="pe-render-pct">0%</span></div>
+          <div class="progress-row"><span id="pe-render-status">Memproses restorasi AI Wink Bypass…</span><span id="pe-render-pct">0%</span></div>
         </div>
       </div>
     </div>
 
     <div class="pe-notice" id="pe-notice">
-      <span>●</span> <span id="pe-notice-text">Pemrosesan Wink Bypass berjalan 100% lokal di browser Anda dengan akselerasi hardware. Menginjeksi exact metadata Wink EXIF untuk hasil maksimal.</span>
+      <span>●</span> <span id="pe-notice-text">Pemrosesan Wink Bypass menggunakan deep learning AI super-resolution dengan surface smoothing dan injeksi metadata Wink EXIF 64-bit untuk hasil HD maksimal.</span>
     </div>
 
     <div class="back-row"><a class="text-link" href="../">← <span data-i18n="back">Balik ke RVL</span></a></div>
