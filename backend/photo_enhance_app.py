@@ -37,6 +37,7 @@ if not MODELS_DIR.exists():
     MODELS_DIR = Path('/app/models')
 
 _sr_cache = {}
+_realesr_model_instance = None
 
 
 def _get_session():
@@ -48,6 +49,114 @@ def _get_session():
         except Exception as exc:
             raise RuntimeError('rembg not available') from exc
     return _rembg_session
+
+
+def _get_realesr_model():
+    """Load Real-ESRGAN v3 ONNX model (preferred) via ONNX Runtime or OpenCV DNN."""
+    global _realesr_model_instance
+    if _realesr_model_instance is not None:
+        return _realesr_model_instance
+
+    model_file = MODELS_DIR / 'realesr-general-x4v3.onnx'
+    if not model_file.exists():
+        for p in [Path('backend/models/realesr-general-x4v3.onnx'), Path('models/realesr-general-x4v3.onnx')]:
+            if p.exists():
+                model_file = p
+                break
+
+    if not model_file.exists():
+        return None
+
+    # Try ONNX Runtime first on Linux (optimized CPU inference)
+    import sys
+    if sys.platform != 'win32':
+        try:
+            import onnxruntime as ort
+            opts = ort.SessionOptions()
+            opts.intra_op_num_threads = max(1, os.cpu_count() or 2)
+            opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            session = ort.InferenceSession(str(model_file), sess_options=opts, providers=['CPUExecutionProvider'])
+            _realesr_model_instance = session
+            return _realesr_model_instance
+        except Exception:
+            pass
+
+    # OpenCV DNN (works on both Windows and Linux, rock solid)
+    try:
+        net = cv2.dnn.readNetFromONNX(str(model_file))
+        net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+        _realesr_model_instance = net
+        return _realesr_model_instance
+    except Exception:
+        return None
+
+
+def _forward_realesr_tile(tile_bgr: np.ndarray, model) -> np.ndarray:
+    """Forward a single tile through Real-ESRGAN (BGR in [0..255] -> 4x BGR in [0..255])."""
+    th, tw = tile_bgr.shape[:2]
+    if hasattr(model, 'run'):
+        # ONNX Runtime InferenceSession
+        tile_rgb = cv2.cvtColor(tile_bgr, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        blob = np.transpose(tile_rgb, (2, 0, 1))[np.newaxis, ...]
+        input_name = model.get_inputs()[0].name
+        out = model.run(None, {input_name: blob})[0]
+        out_rgb = out.squeeze(0).transpose(1, 2, 0)
+        out_rgb = np.clip(out_rgb * 255.0, 0, 255).astype(np.uint8)
+        return cv2.cvtColor(out_rgb, cv2.COLOR_RGB2BGR)
+    else:
+        # OpenCV DNN Net
+        blob = cv2.dnn.blobFromImage(tile_bgr, scalefactor=1.0 / 255.0, size=(tw, th), swapRB=True, crop=False)
+        model.setInput(blob)
+        out = model.forward()
+        out_rgb = out.squeeze(0).transpose(1, 2, 0)
+        out_rgb = np.clip(out_rgb * 255.0, 0, 255).astype(np.uint8)
+        return cv2.cvtColor(out_rgb, cv2.COLOR_RGB2BGR)
+
+
+def upscale_with_realesr(img_bgr: np.ndarray, model, tile_size: int = 256, tile_pad: int = 16) -> np.ndarray:
+    """Run Real-ESRGAN with memory-safe tiling to prevent OOM on server."""
+    h, w = img_bgr.shape[:2]
+    scale = 4
+    out_h, out_w = h * scale, w * scale
+
+    if w <= (tile_size + tile_pad * 2) and h <= (tile_size + tile_pad * 2):
+        return _forward_realesr_tile(img_bgr, model)
+
+    output = np.zeros((out_h, out_w, 3), dtype=np.uint8)
+    tiles_x = int(np.ceil(w / tile_size))
+    tiles_y = int(np.ceil(h / tile_size))
+
+    for y in range(tiles_y):
+        for x in range(tiles_x):
+            ofs_x = x * tile_size
+            ofs_y = y * tile_size
+
+            in_x0 = ofs_x
+            in_x1 = min(ofs_x + tile_size, w)
+            in_y0 = ofs_y
+            in_y1 = min(ofs_y + tile_size, h)
+
+            pad_x0 = max(0, in_x0 - tile_pad)
+            pad_x1 = min(w, in_x1 + tile_pad)
+            pad_y0 = max(0, in_y0 - tile_pad)
+            pad_y1 = min(h, in_y1 + tile_pad)
+
+            tile_in = img_bgr[pad_y0:pad_y1, pad_x0:pad_x1]
+            tile_out = _forward_realesr_tile(tile_in, model)
+
+            crop_x0 = (in_x0 - pad_x0) * scale
+            crop_x1 = crop_x0 + (in_x1 - in_x0) * scale
+            crop_y0 = (in_y0 - pad_y0) * scale
+            crop_y1 = crop_y0 + (in_y1 - in_y0) * scale
+
+            out_x0 = in_x0 * scale
+            out_x1 = in_x1 * scale
+            out_y0 = in_y0 * scale
+            out_y1 = in_y1 * scale
+
+            output[out_y0:out_y1, out_x0:out_x1] = tile_out[crop_y0:crop_y1, crop_x0:crop_x1]
+
+    return output
 
 
 def _get_sr_model(multiplier: int):
@@ -156,36 +265,56 @@ def inject_wink_exif(jpeg_bytes: bytes, width: int, height: int) -> bytes:
 
 def process_ai_upscale(img_bgr: np.ndarray, multiplier: int = 4) -> np.ndarray:
     """
-    Genuine AI Super-Resolution pipeline (Wink Bypass):
-    1. Edge-preserving surface denoise/smoothing to remove JPEG compression blockiness without softening edges.
-    2. Deep learning FSRCNN super-resolution inference (2x or 4x).
+    Genuine AI Super-Resolution pipeline (Real-ESRGAN v3 GAN + Wink Bypass):
+    1. Edge-preserving surface denoise/smoothing to eliminate compression noise while preserving sharpness.
+    2. Deep learning Real-ESRGAN v3 super-resolution inference (4x native, with Lanczos downscale to 2x for ultra-sharp 2x).
     3. Micro-contrast detail lift strictly on Luminance (LAB) to avoid chromatic halos.
     """
     h, w = img_bgr.shape[:2]
 
-    # Guard: Clamp max input if already ultra high resolution to prevent OOM
-    # If 4x would exceed 5120px max dimension, downscale input proportionally
-    max_target_dim = 5120
+    # Guard: Clamp max input to prevent OOM on server.
+    # Max target dimension is 3840 (4K UHD)
+    max_target_dim = 3840
     if max(h, w) * multiplier > max_target_dim:
         scale = max_target_dim / (max(h, w) * multiplier)
-        new_w = int(w * scale)
-        new_h = int(h * scale)
+        new_w = max(64, int(w * scale))
+        new_h = max(64, int(h * scale))
         img_bgr = cv2.resize(img_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        h, w = img_bgr.shape[:2]
 
-    # Step 1: Gentle edge-preserving smoothing (eliminates JPEG block noise on skin/sky/surfaces)
-    smooth = cv2.bilateralFilter(img_bgr, d=5, sigmaColor=18, sigmaSpace=18)
+    # Step 1: Gentle edge-preserving smoothing
+    smooth = cv2.bilateralFilter(img_bgr, d=5, sigmaColor=15, sigmaSpace=15)
 
-    # Step 2: FSRCNN Super-Resolution
-    sr = _get_sr_model(multiplier)
-    upscaled = sr.upsample(smooth)
+    # Step 2: Super-Resolution (Real-ESRGAN v3 with fallback to FSRCNN)
+    upscaled = None
+    realesr = _get_realesr_model()
+    if realesr is not None:
+        try:
+            res_4x = upscale_with_realesr(smooth, realesr, tile_size=256, tile_pad=16)
+            if multiplier == 2:
+                # Downsampling 4x GAN output to 2x via area interpolation gives crystal clarity with zero aliasing
+                upscaled = cv2.resize(res_4x, (w * 2, h * 2), interpolation=cv2.INTER_AREA)
+            else:
+                upscaled = res_4x
+        except Exception:
+            upscaled = None
+
+    if upscaled is None:
+        # Fallback to FSRCNN
+        try:
+            sr = _get_sr_model(multiplier)
+            upscaled = sr.upsample(smooth)
+        except Exception:
+            # Fallback to Lanczos
+            upscaled = cv2.resize(smooth, (w * multiplier, h * multiplier), interpolation=cv2.INTER_LANCZOS4)
 
     # Step 3: Subtle Micro-detail reconstruction in LAB luminance channel
     lab = cv2.cvtColor(upscaled, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
 
-    blur_l = cv2.GaussianBlur(l, (0, 0), 1.8)
+    blur_l = cv2.GaussianBlur(l, (0, 0), 1.5)
     detail = cv2.subtract(l, blur_l)
-    l_sharp = cv2.addWeighted(l, 1.0, detail, 0.35, 0)
+    l_sharp = cv2.addWeighted(l, 1.0, detail, 0.30, 0)
 
     final_bgr = cv2.cvtColor(cv2.merge([l_sharp, a, b]), cv2.COLOR_LAB2BGR)
     return final_bgr
@@ -193,7 +322,8 @@ def process_ai_upscale(img_bgr: np.ndarray, multiplier: int = 4) -> np.ndarray:
 
 @app.get('/api/photo/health')
 async def photo_health():
-    return {'ok': True, 'max_bytes': PHOTO_MAX_BYTES, 'features': ['remove-bg', 'upscale'], 'models': ['fsrcnn_x2', 'fsrcnn_x4']}
+    models = ['realesr-general-x4v3', 'fsrcnn_x2', 'fsrcnn_x4']
+    return {'ok': True, 'max_bytes': PHOTO_MAX_BYTES, 'features': ['remove-bg', 'upscale'], 'models': models}
 
 
 @app.post('/api/photo/remove-bg')

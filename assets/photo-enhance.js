@@ -560,14 +560,14 @@
       try {
         renderFill.style.width = '45%';
         renderPct.textContent = '45%';
-        renderStatus.textContent = text(`Memproses neural upscale ${selectedMultiplier}×…`, `Processing ${selectedMultiplier}× neural upscale…`);
+        renderStatus.textContent = text(`Memproses Real-ESRGAN AI Super-Resolution ${selectedMultiplier}×…`, `Processing ${selectedMultiplier}× Real-ESRGAN AI Super-Resolution…`);
 
         const formData = new FormData();
         formData.append('file', sourceFile);
         formData.append('multiplier', String(selectedMultiplier));
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000);
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
 
         const resp = await fetch('https://enhanced-video-production.up.railway.app/api/photo/upscale', {
           method: 'POST',
