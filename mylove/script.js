@@ -1,5 +1,5 @@
 /**
- * RVL HD - My Love (Birthday Edition)
+ * RVL HD - My Love (Birthday Edition for Elnitha)
  * Interactive Script
  */
 
@@ -17,70 +17,72 @@ document.addEventListener('DOMContentLoaded', () => {
   const hintModal = document.getElementById('hintModal');
   const closeHintBtn = document.getElementById('closeHintBtn');
   const loginCard = document.getElementById('loginCard');
+  const loginCat = document.getElementById('loginCat');
+  const loginErrorMessage = document.getElementById('loginErrorMessage');
 
+  // Voice Note Elements
+  const voiceSection = document.getElementById('voiceSection');
+  const voiceAudio = document.getElementById('voiceAudio');
+  const btnPlayVoice = document.getElementById('btnPlayVoice');
+  const voicePlayIcon = document.getElementById('voicePlayIcon');
+  const voiceBtnText = document.getElementById('voiceBtnText');
+  const sittingCatBox = document.getElementById('sittingCatBox');
+  const sittingCatCaption = document.getElementById('sittingCatCaption');
+  const voiceWaveform = document.getElementById('voiceWaveform');
+  const voiceProgressBox = document.getElementById('voiceProgressBox');
+  const voiceProgressTrack = document.getElementById('voiceProgressTrack');
+  const voiceProgressFill = document.getElementById('voiceProgressFill');
+  const voiceCurrentTime = document.getElementById('voiceCurrentTime');
+  const voiceDurationTime = document.getElementById('voiceDurationTime');
+
+  // Cake & Interactive Elements
   const cakeBox = document.getElementById('interactiveCake');
   const cakeStatus = document.getElementById('cakeStatus');
   const btnBurstLove = document.getElementById('btnBurstLove');
   const loveCounterText = document.getElementById('loveCounter');
 
+  // Lightbox
+  const photoLightbox = document.getElementById('photoLightbox');
+  const lightboxImg = document.getElementById('lightboxImg');
+
   // Music Player Elements
   const musicPlayer = document.getElementById('musicPlayer');
-  const audio = document.getElementById('bgAudio');
+  const bgAudio = document.getElementById('bgAudio');
   const vinylRecord = document.getElementById('vinylRecord');
   const playPauseBtn = document.getElementById('playPauseBtn');
-  const prevTrackBtn = document.getElementById('prevTrackBtn');
-  const nextTrackBtn = document.getElementById('nextTrackBtn');
-  const trackTitle = document.getElementById('trackTitle');
-  const trackArtist = document.getElementById('trackArtist');
+  const playPauseIcon = document.getElementById('playPauseIcon');
   const progressFill = document.getElementById('progressFill');
   const progressTrack = document.getElementById('progressTrack');
   const currentTimeDisplay = document.getElementById('currentTime');
   const durationTimeDisplay = document.getElementById('durationTime');
-  const togglePlaylistBtn = document.getElementById('togglePlaylistBtn');
-  const playlistMenu = document.getElementById('playlistMenu');
-  const customAudioInput = document.getElementById('customAudioInput');
-  const uploadCustomAudioBtn = document.getElementById('uploadCustomAudioBtn');
 
   // State
-  let currentTrackIndex = 0;
-  let isPlaying = false;
-  let loveCount = 0;
+  let isBgmPlaying = false;
+  let bgmUserInitiated = false;
+  let isVoicePlaying = false;
   let candlesBlown = false;
+  let isFallingCat = false;
 
-  // 90s Romantic Curated Playlist
-  const playlist = [
-    {
-      title: "Kiss Me",
-      artist: "Sixpence None The Richer (1997)",
-      url: "https://archive.org/download/Sixpence_None_The_Richer_Kiss_Me/Sixpence%20None%20The%20Richer%20-%20Kiss%20Me.mp3"
-    },
-    {
-      title: "Truly Madly Deeply",
-      artist: "Savage Garden (1997)",
-      url: "https://archive.org/download/romanticas90/Savage%20Garden%20-%20Truly%20Madly%20Deeply.mp3"
-    },
-    {
-      title: "More Than Words",
-      artist: "Extreme (1990)",
-      url: "https://archive.org/download/romanticas90/Extreme%20-%20More%20Than%20Words.mp3"
-    },
-    {
-      title: "(Everything I Do) I Do It For You",
-      artist: "Bryan Adams (1991)",
-      url: "https://archive.org/download/romanticas90/Bryan%20Adams%20-%20%28Everything%20I%20Do%29%20I%20Do%20It%20For%20You.mp3"
-    }
-  ];
+  // Persistent Peluk & Cium Count (Requirement 9)
+  const STORAGE_KEY = 'mylove_elnitha_peluk_cium';
+  let loveCount = parseInt(localStorage.getItem(STORAGE_KEY), 10) || 0;
+  loveCounterText.textContent = `${loveCount} Peluk & Cium Terkirim! 💕`;
 
   // ==========================================
-  // Web Audio Synth Sound Effects (Zero Lag)
+  // Web Audio Synth Sound FX (Zero Lag & Lightweight)
   // ==========================================
   const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-  function playChime() {
+  function resumeAudioContext() {
     if (audioCtx.state === 'suspended') {
       audioCtx.resume();
     }
-    const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+  }
+
+  // Chime Sound
+  function playChime() {
+    resumeAudioContext();
+    const notes = [523.25, 659.25, 783.99, 1046.50];
     notes.forEach((freq, index) => {
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
@@ -95,22 +97,99 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function playPopSound() {
-    if (audioCtx.state === 'suspended') {
-      audioCtx.resume();
-    }
+  // Bonk / Falling Sound when password is wrong
+  function playFallingBonk() {
+    resumeAudioContext();
+    // Slide whistle down
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
-    osc.type = 'triangle';
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(120, audioCtx.currentTime + 0.5);
+    gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(audioCtx.currentTime);
+    osc.stop(audioCtx.currentTime + 0.5);
+
+    // Bonk at 0.5s
+    setTimeout(() => {
+      const bonkOsc = audioCtx.createOscillator();
+      const bonkGain = audioCtx.createGain();
+      bonkOsc.type = 'triangle';
+      bonkOsc.frequency.setValueAtTime(160, audioCtx.currentTime);
+      bonkOsc.frequency.exponentialRampToValueAtTime(60, audioCtx.currentTime + 0.25);
+      bonkGain.gain.setValueAtTime(0.35, audioCtx.currentTime);
+      bonkGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+      bonkOsc.connect(bonkGain);
+      bonkGain.connect(audioCtx.destination);
+      bonkOsc.start(audioCtx.currentTime);
+      bonkOsc.stop(audioCtx.currentTime + 0.25);
+    }, 450);
+  }
+
+  // Festive Fanfare for Candle Blow (Meriah & Ringan Memory)
+  function playFestiveFanfare() {
+    resumeAudioContext();
+    // Happy birthday trumpet fanfare motif
+    const fanfareNotes = [
+      { f: 523.25, d: 0.18, t: 0.0 },   // C5
+      { f: 523.25, d: 0.18, t: 0.2 },   // C5
+      { f: 587.33, d: 0.35, t: 0.4 },   // D5
+      { f: 523.25, d: 0.35, t: 0.8 },   // C5
+      { f: 698.46, d: 0.35, t: 1.2 },   // F5
+      { f: 659.25, d: 0.65, t: 1.6 },   // E5
+      { f: 783.99, d: 0.80, t: 2.3 }    // G5 grand finish
+    ];
+
+    fanfareNotes.forEach(note => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(note.f, audioCtx.currentTime + note.t);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime + note.t);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + note.t + note.d);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(audioCtx.currentTime + note.t);
+      osc.stop(audioCtx.currentTime + note.t + note.d);
+    });
+  }
+
+  function playPopSound() {
+    resumeAudioContext();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
     osc.frequency.setValueAtTime(450, audioCtx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.08);
-    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
     osc.connect(gain);
     gain.connect(audioCtx.destination);
     osc.start(audioCtx.currentTime);
     osc.stop(audioCtx.currentTime + 0.08);
   }
+
+  // ==========================================
+  // Requirement 3: Autoplay BGM on first click anywhere
+  // ==========================================
+  function startBgmOnFirstInteraction() {
+    if (!bgmUserInitiated && !isVoicePlaying) {
+      bgAudio.play().then(() => {
+        bgmUserInitiated = true;
+        isBgmPlaying = true;
+        vinylRecord.classList.add('spinning');
+        updatePlayBtnIcon(true);
+      }).catch(err => {
+        // Will retry on next interaction
+      });
+    }
+  }
+
+  document.addEventListener('click', startBgmOnFirstInteraction, { passive: true });
+  document.addEventListener('touchstart', startBgmOnFirstInteraction, { passive: true });
 
   // ==========================================
   // Stage 1: Interactive Envelope
@@ -129,7 +208,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ==========================================
-  // Stage 2: Login Panel & Hint
+  // Stage 2: Login Panel & Cat Falling Animation (Requirement 2)
   // ==========================================
   togglePassBtn.addEventListener('click', () => {
     const isPass = passwordInput.getAttribute('type') === 'password';
@@ -139,7 +218,6 @@ document.addEventListener('DOMContentLoaded', () => {
       `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
   });
 
-  // Show Hint Modal
   hintBtn.addEventListener('click', () => {
     playPopSound();
     hintModal.classList.add('active');
@@ -155,38 +233,162 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Login Submit Logic
+  // Strict Password Validation: holysmol8
   loginForm.addEventListener('submit', (e) => {
     e.preventDefault();
-    const enteredPassword = passwordInput.value.trim();
+    const entered = passwordInput.value.trim().toLowerCase();
 
-    if (!enteredPassword) {
-      // Empty input: Shake card gently & alert nicely
-      loginCard.classList.remove('shake');
-      void loginCard.offsetWidth; // trigger reflow
-      loginCard.classList.add('shake');
-      alert("Passwordnya jangan dikosongin sayang! Cek petunjuk kalau lupa yaa 🥺💖");
+    // Check password
+    if (entered !== 'holysmol8') {
+      triggerCatFalling();
       return;
     }
 
-    // Unlocked!
+    // Success! Password correct!
     playChime();
     triggerCelebrationConfetti();
 
     stageLogin.classList.add('hidden');
     stageCelebration.classList.remove('hidden');
-    musicPlayer.classList.add('active');
 
-    // Scroll to top
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
-    // Autoplay music
-    loadTrack(currentTrackIndex);
-    playTrack();
+    // Ensure music is playing
+    if (!isBgmPlaying && !isVoicePlaying) {
+      bgAudio.play().then(() => {
+        isBgmPlaying = true;
+        vinylRecord.classList.add('spinning');
+        updatePlayBtnIcon(true);
+      }).catch(err => console.log(err));
+    }
+  });
+
+  // Cat Falling down animation
+  function triggerCatFalling() {
+    if (isFallingCat) return;
+    isFallingCat = true;
+
+    playFallingBonk();
+
+    // Shake card
+    loginCard.classList.remove('shake');
+    void loginCard.offsetWidth;
+    loginCard.classList.add('shake');
+
+    // Show error banner
+    loginErrorMessage.style.display = 'block';
+
+    // Swap cat to struggle & falling tumble animation
+    loginCat.src = './assets/struggle.gif';
+    loginCat.classList.add('cat-falling');
+
+    // Reset cat after 3 seconds
+    setTimeout(() => {
+      loginCat.classList.remove('cat-falling');
+      loginCat.src = './assets/taps.gif';
+      isFallingCat = false;
+    }, 3200);
+  }
+
+  // ==========================================
+  // Requirement 6: Special Voice Note with Cinema Focus Mode
+  // ==========================================
+  btnPlayVoice.addEventListener('click', () => {
+    if (isVoicePlaying) {
+      pauseVoiceNote();
+    } else {
+      playVoiceNote();
+    }
+  });
+
+  function playVoiceNote() {
+    // 1. Pause BGM smoothly
+    if (isBgmPlaying) {
+      bgAudio.pause();
+      isBgmPlaying = false;
+      vinylRecord.classList.remove('spinning');
+      updatePlayBtnIcon(false);
+    }
+
+    // 2. Activate Cinema Focus Mode
+    document.body.classList.add('cinema-mode-active');
+
+    // 3. Reset and show sitting smiling cat
+    sittingCatBox.classList.remove('fade-out');
+    sittingCatCaption.textContent = 'Duduk manis dengerin suara sayang... 🐱💕';
+
+    // 4. Play Voice Note
+    voiceAudio.play().then(() => {
+      isVoicePlaying = true;
+      voiceWaveform.classList.add('active');
+      voiceProgressBox.classList.add('active');
+      voiceBtnText.textContent = 'Jeda Pesan Suara ⏸️';
+      voicePlayIcon.innerHTML = `<rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect>`;
+    }).catch(err => {
+      console.log('Error playing voice:', err);
+    });
+  }
+
+  function pauseVoiceNote() {
+    voiceAudio.pause();
+    isVoicePlaying = false;
+    voiceWaveform.classList.remove('active');
+    voiceBtnText.textContent = 'Lanjutkan Pesan Suara ▶️';
+    voicePlayIcon.innerHTML = `<polygon points="5 3 19 12 5 21 5 3"></polygon>`;
+  }
+
+  // Voice Note Time Update
+  voiceAudio.addEventListener('timeupdate', () => {
+    if (voiceAudio.duration) {
+      const pct = (voiceAudio.currentTime / voiceAudio.duration) * 100;
+      voiceProgressFill.style.width = `${pct}%`;
+      voiceCurrentTime.textContent = formatTime(voiceAudio.currentTime);
+      voiceDurationTime.textContent = formatTime(voiceAudio.duration);
+    }
+  });
+
+  voiceAudio.addEventListener('loadedmetadata', () => {
+    voiceDurationTime.textContent = formatTime(voiceAudio.duration);
+  });
+
+  voiceProgressTrack.addEventListener('click', (e) => {
+    const rect = voiceProgressTrack.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const width = rect.width;
+    if (voiceAudio.duration) {
+      voiceAudio.currentTime = (clickX / width) * voiceAudio.duration;
+    }
+  });
+
+  // When Voice Note Finishes (Requirement 6)
+  voiceAudio.addEventListener('ended', () => {
+    isVoicePlaying = false;
+    voiceWaveform.classList.remove('active');
+    voiceBtnText.textContent = 'Putar Ulang Pesan Suara 💕';
+    voicePlayIcon.innerHTML = `<polygon points="5 3 19 12 5 21 5 3"></polygon>`;
+
+    // Cat fades out smoothly
+    sittingCatCaption.textContent = 'Selesai didengar! Senang banget... 🥰';
+    setTimeout(() => {
+      sittingCatBox.classList.add('fade-out');
+    }, 1000);
+
+    // End cinema mode
+    setTimeout(() => {
+      document.body.classList.remove('cinema-mode-active');
+      triggerCelebrationConfetti();
+
+      // Resume BGM smoothly
+      bgAudio.play().then(() => {
+        isBgmPlaying = true;
+        vinylRecord.classList.add('spinning');
+        updatePlayBtnIcon(true);
+      }).catch(e => console.log(e));
+    }, 1800);
   });
 
   // ==========================================
-  // Stage 3: Interactive Birthday Cake
+  // Requirement 7: Festive Candle Blowing (Meriah & Ringan)
   // ==========================================
   cakeBox.addEventListener('click', () => {
     if (candlesBlown) return;
@@ -194,15 +396,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Blow candles
     document.querySelectorAll('.candle').forEach(c => c.classList.add('blown'));
-    playChime();
-    triggerCelebrationConfetti();
+    
+    // Play Festive Fanfare
+    playFestiveFanfare();
 
-    cakeStatus.innerHTML = `🎉 <strong>Permintaanmu sudah tersimpan di bintang-bintang!</strong><br><span style="color:#ff4d88; font-weight:600;">Semoga semua impian & kebahagiaan selalu menyertai langkahmu, sayang! Amin 💖🎂</span>`;
+    // Meriah Confetti Cannons (Left, Right, Center)
+    if (typeof confetti === 'function') {
+      // Left cannon
+      confetti({
+        particleCount: 80,
+        angle: 60,
+        spread: 60,
+        origin: { x: 0, y: 0.7 },
+        colors: ['#ff4d88', '#ffccd9', '#ffffff', '#ffd700']
+      });
+      // Right cannon
+      confetti({
+        particleCount: 80,
+        angle: 120,
+        spread: 60,
+        origin: { x: 1, y: 0.7 },
+        colors: ['#ff4d88', '#ffccd9', '#ffffff', '#ffd700']
+      });
+      // Center starburst
+      setTimeout(() => {
+        confetti({
+          particleCount: 100,
+          spread: 100,
+          origin: { y: 0.55 },
+          colors: ['#ff2a70', '#ff85a2', '#ffffff', '#ffd166', '#ff007f']
+        });
+      }, 300);
+    }
+
+    cakeStatus.innerHTML = `🎉 <strong>Lilin sudah tertiup & harapanmu terkirim ke langit!</strong><br><span style="color:#ff4d88; font-weight:700;">Semoga semua impian & kebahagiaan selalu menyertai Elnitha sayang! Amin 💖🎂✨</span>`;
   });
 
-  // Interactive Love Burst Button
+  // ==========================================
+  // Requirement 9: Persistent Peluk & Cium Counter
+  // ==========================================
   btnBurstLove.addEventListener('click', (e) => {
     loveCount += 1;
+    localStorage.setItem(STORAGE_KEY, loveCount);
     loveCounterText.textContent = `${loveCount} Peluk & Cium Terkirim! 💕`;
     playPopSound();
 
@@ -216,78 +451,72 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ==========================================
-  // Music Player Implementation
+  // Requirement 5: Photo Lightbox Preview
   // ==========================================
-  function loadTrack(index) {
-    const track = playlist[index];
-    trackTitle.textContent = track.title;
-    trackArtist.textContent = track.artist;
-    audio.src = track.url;
-    progressFill.style.width = '0%';
-    currentTimeDisplay.textContent = '0:00';
-    updatePlaylistActiveItem();
-  }
-
-  function playTrack() {
-    audio.play().then(() => {
-      isPlaying = true;
-      vinylRecord.classList.add('spinning');
-      playPauseBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>`;
-    }).catch(err => {
-      console.log("Autoplay blocked by browser, user interaction required:", err);
+  document.querySelectorAll('.polaroid-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const src = card.getAttribute('data-src');
+      if (src) {
+        lightboxImg.src = src;
+        photoLightbox.classList.add('active');
+        playPopSound();
+      }
     });
-  }
+  });
 
-  function pauseTrack() {
-    audio.pause();
-    isPlaying = false;
-    vinylRecord.classList.remove('spinning');
-    playPauseBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
+  photoLightbox.addEventListener('click', () => {
+    photoLightbox.classList.remove('active');
+  });
+
+  // ==========================================
+  // Requirement 4: Single BGM Player Controls
+  // ==========================================
+  function updatePlayBtnIcon(playing) {
+    if (playing) {
+      playPauseIcon.innerHTML = `<rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect>`;
+    } else {
+      playPauseIcon.innerHTML = `<polygon points="5 3 19 12 5 21 5 3"></polygon>`;
+    }
   }
 
   playPauseBtn.addEventListener('click', () => {
-    if (isPlaying) {
-      pauseTrack();
+    if (isBgmPlaying) {
+      bgAudio.pause();
+      isBgmPlaying = false;
+      vinylRecord.classList.remove('spinning');
+      updatePlayBtnIcon(false);
     } else {
-      playTrack();
+      // If voice is currently playing, pause voice first
+      if (isVoicePlaying) {
+        pauseVoiceNote();
+      }
+      bgAudio.play().then(() => {
+        isBgmPlaying = true;
+        vinylRecord.classList.add('spinning');
+        updatePlayBtnIcon(true);
+      }).catch(e => console.log(e));
     }
   });
 
-  prevTrackBtn.addEventListener('click', () => {
-    currentTrackIndex = (currentTrackIndex - 1 + playlist.length) % playlist.length;
-    loadTrack(currentTrackIndex);
-    playTrack();
+  bgAudio.addEventListener('loadedmetadata', () => {
+    durationTimeDisplay.textContent = formatTime(bgAudio.duration);
   });
 
-  nextTrackBtn.addEventListener('click', () => {
-    currentTrackIndex = (currentTrackIndex + 1) % playlist.length;
-    loadTrack(currentTrackIndex);
-    playTrack();
-  });
-
-  audio.addEventListener('loadedmetadata', () => {
-    durationTimeDisplay.textContent = formatTime(audio.duration);
-  });
-
-  audio.addEventListener('timeupdate', () => {
-    if (audio.duration) {
-      const pct = (audio.currentTime / audio.duration) * 100;
+  bgAudio.addEventListener('timeupdate', () => {
+    if (bgAudio.duration) {
+      const pct = (bgAudio.currentTime / bgAudio.duration) * 100;
       progressFill.style.width = `${pct}%`;
-      currentTimeDisplay.textContent = formatTime(audio.currentTime);
-      durationTimeDisplay.textContent = formatTime(audio.duration);
+      currentTimeDisplay.textContent = formatTime(bgAudio.currentTime);
+      durationTimeDisplay.textContent = formatTime(bgAudio.duration);
     }
-  });
-
-  audio.addEventListener('ended', () => {
-    nextTrackBtn.click();
   });
 
   progressTrack.addEventListener('click', (e) => {
     const rect = progressTrack.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const width = rect.width;
-    if (audio.duration) {
-      audio.currentTime = (clickX / width) * audio.duration;
+    if (bgAudio.duration) {
+      bgAudio.currentTime = (clickX / width) * bgAudio.duration;
     }
   });
 
@@ -297,58 +526,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   }
-
-  // Toggle Playlist Drawer
-  togglePlaylistBtn.addEventListener('click', () => {
-    playlistMenu.classList.toggle('active');
-  });
-
-  function renderPlaylistMenu() {
-    playlistMenu.innerHTML = '';
-    playlist.forEach((track, i) => {
-      const item = document.createElement('div');
-      item.className = `playlist-item ${i === currentTrackIndex ? 'active' : ''}`;
-      item.innerHTML = `<span><strong>${track.title}</strong> — ${track.artist}</span><span>🎵</span>`;
-      item.addEventListener('click', () => {
-        currentTrackIndex = i;
-        loadTrack(currentTrackIndex);
-        playTrack();
-        playlistMenu.classList.remove('active');
-      });
-      playlistMenu.appendChild(item);
-    });
-  }
-
-  function updatePlaylistActiveItem() {
-    const items = playlistMenu.querySelectorAll('.playlist-item');
-    items.forEach((item, i) => {
-      item.classList.toggle('active', i === currentTrackIndex);
-    });
-  }
-
-  renderPlaylistMenu();
-
-  // Custom Audio Upload Handler
-  uploadCustomAudioBtn.addEventListener('click', () => {
-    customAudioInput.click();
-  });
-
-  customAudioInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const fileUrl = URL.createObjectURL(file);
-      playlist.unshift({
-        title: file.name.replace(/\.[^/.]+$/, ""),
-        artist: "Lagu Pilihan Spesial Kita 💖",
-        url: fileUrl
-      });
-      currentTrackIndex = 0;
-      renderPlaylistMenu();
-      loadTrack(0);
-      playTrack();
-      alert(`Berhasil memuat lagu: ${file.name} 🎵`);
-    }
-  });
 
   // ==========================================
   // Confetti & Particle Effects
@@ -390,7 +567,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ==========================================
-  // Canvas Floating Ambient Hearts (Background)
+  // Canvas Ambient Floating Hearts
   // ==========================================
   const canvas = document.getElementById('heartCanvas');
   const ctx = canvas.getContext('2d');
