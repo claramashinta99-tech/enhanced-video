@@ -20,16 +20,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const loginCat = document.getElementById('loginCat');
   const loginErrorMessage = document.getElementById('loginErrorMessage');
 
-  // Voice Note Elements
-  const voiceSection = document.getElementById('voiceSection');
+  // Voice Cinema Modal Elements
+  const voiceCinemaModal = document.getElementById('voiceCinemaModal');
+  const btnCloseVoiceModal = document.getElementById('btnCloseVoiceModal');
+  const btnOpenVoiceModal = document.getElementById('btnOpenVoiceModal');
+  const btnToggleVoicePlayback = document.getElementById('btnToggleVoicePlayback');
+  const voiceToggleIcon = document.getElementById('voiceToggleIcon');
   const voiceAudio = document.getElementById('voiceAudio');
-  const btnPlayVoice = document.getElementById('btnPlayVoice');
-  const voicePlayIcon = document.getElementById('voicePlayIcon');
-  const voiceBtnText = document.getElementById('voiceBtnText');
-  const sittingCatBox = document.getElementById('sittingCatBox');
-  const sittingCatCaption = document.getElementById('sittingCatCaption');
+  const voiceCatImg = document.getElementById('voiceCatImg');
+  const voiceCatCaption = document.getElementById('voiceCatCaption');
   const voiceWaveform = document.getElementById('voiceWaveform');
-  const voiceProgressBox = document.getElementById('voiceProgressBox');
   const voiceProgressTrack = document.getElementById('voiceProgressTrack');
   const voiceProgressFill = document.getElementById('voiceProgressFill');
   const voiceCurrentTime = document.getElementById('voiceCurrentTime');
@@ -100,7 +100,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Bonk / Falling Sound when password is wrong
   function playFallingBonk() {
     resumeAudioContext();
-    // Slide whistle down
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     osc.type = 'sawtooth';
@@ -113,7 +112,6 @@ document.addEventListener('DOMContentLoaded', () => {
     osc.start(audioCtx.currentTime);
     osc.stop(audioCtx.currentTime + 0.5);
 
-    // Bonk at 0.5s
     setTimeout(() => {
       const bonkOsc = audioCtx.createOscillator();
       const bonkGain = audioCtx.createGain();
@@ -129,10 +127,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 450);
   }
 
-  // Festive Fanfare for Candle Blow (Meriah & Ringan Memory)
+  // Festive Fanfare for Candle Blow
   function playFestiveFanfare() {
     resumeAudioContext();
-    // Happy birthday trumpet fanfare motif
     const fanfareNotes = [
       { f: 523.25, d: 0.18, t: 0.0 },   // C5
       { f: 523.25, d: 0.18, t: 0.2 },   // C5
@@ -140,7 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
       { f: 523.25, d: 0.35, t: 0.8 },   // C5
       { f: 698.46, d: 0.35, t: 1.2 },   // F5
       { f: 659.25, d: 0.65, t: 1.6 },   // E5
-      { f: 783.99, d: 0.80, t: 2.3 }    // G5 grand finish
+      { f: 783.99, d: 0.80, t: 2.3 }    // G5
     ];
 
     fanfareNotes.forEach(note => {
@@ -173,7 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ==========================================
-  // Requirement 3: Autoplay BGM on first click anywhere
+  // Autoplay BGM on first click anywhere
   // ==========================================
   function startBgmOnFirstInteraction() {
     if (!bgmUserInitiated && !isVoicePlaying) {
@@ -183,7 +180,7 @@ document.addEventListener('DOMContentLoaded', () => {
         vinylRecord.classList.add('spinning');
         updatePlayBtnIcon(true);
       }).catch(err => {
-        // Will retry on next interaction
+        // Retry on next tap
       });
     }
   }
@@ -208,14 +205,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ==========================================
-  // Stage 2: Login Panel & Cat Falling Animation (Requirement 2)
+  // Stage 2: Login Panel & Cat Falling
   // ==========================================
   togglePassBtn.addEventListener('click', () => {
     const isPass = passwordInput.getAttribute('type') === 'password';
     passwordInput.setAttribute('type', isPass ? 'text' : 'password');
     togglePassBtn.innerHTML = isPass ? 
       `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>` : 
-      `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
+      `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="3" r="3"></circle></svg>`;
   });
 
   hintBtn.addEventListener('click', () => {
@@ -238,13 +235,12 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     const entered = passwordInput.value.trim().toLowerCase();
 
-    // Check password
     if (entered !== 'holysmol8') {
       triggerCatFalling();
       return;
     }
 
-    // Success! Password correct!
+    // Success!
     playChime();
     triggerCelebrationConfetti();
 
@@ -253,7 +249,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
-    // Ensure music is playing
+    // Play BGM if not already playing
     if (!isBgmPlaying && !isVoicePlaying) {
       bgAudio.play().then(() => {
         isBgmPlaying = true;
@@ -263,26 +259,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Cat Falling down animation
   function triggerCatFalling() {
     if (isFallingCat) return;
     isFallingCat = true;
 
     playFallingBonk();
 
-    // Shake card
     loginCard.classList.remove('shake');
     void loginCard.offsetWidth;
     loginCard.classList.add('shake');
 
-    // Show error banner
     loginErrorMessage.style.display = 'block';
 
-    // Swap cat to struggle & falling tumble animation
     loginCat.src = './assets/struggle.gif';
     loginCat.classList.add('cat-falling');
 
-    // Reset cat after 3 seconds
     setTimeout(() => {
       loginCat.classList.remove('cat-falling');
       loginCat.src = './assets/taps.gif';
@@ -291,17 +282,17 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ==========================================
-  // Requirement 6: Special Voice Note with Cinema Focus Mode
+  // Voice Cinema Modal (Fullscreen Blur, Sitting Cat, Exit X Button, Cat Kabur)
   // ==========================================
-  btnPlayVoice.addEventListener('click', () => {
-    if (isVoicePlaying) {
-      pauseVoiceNote();
-    } else {
-      playVoiceNote();
-    }
+  btnOpenVoiceModal.addEventListener('click', () => {
+    openVoiceModal();
   });
 
-  function playVoiceNote() {
+  btnCloseVoiceModal.addEventListener('click', () => {
+    closeVoiceModal();
+  });
+
+  function openVoiceModal() {
     // 1. Pause BGM smoothly
     if (isBgmPlaying) {
       bgAudio.pause();
@@ -310,34 +301,58 @@ document.addEventListener('DOMContentLoaded', () => {
       updatePlayBtnIcon(false);
     }
 
-    // 2. Activate Cinema Focus Mode
-    document.body.classList.add('cinema-mode-active');
+    // 2. Reset Voice Cat to sitting state
+    voiceCatImg.src = './assets/sit.gif';
+    voiceCatImg.classList.remove('cat-kabur');
+    voiceCatCaption.textContent = 'Duduk manis dengerin suara sayang... 🐱💕';
 
-    // 3. Reset and show sitting smiling cat
-    sittingCatBox.classList.remove('fade-out');
-    sittingCatCaption.textContent = 'Duduk manis dengerin suara sayang... 🐱💕';
+    // 3. Open Modal with blur
+    voiceCinemaModal.classList.add('active');
+    playPopSound();
 
-    // 4. Play Voice Note
+    // 4. Start Playing Voice Note
+    startVoicePlayback();
+  }
+
+  function closeVoiceModal() {
+    // Pause voice note
+    pauseVoicePlayback();
+
+    // Close modal
+    voiceCinemaModal.classList.remove('active');
+
+    // Resume BGM smoothly
+    bgAudio.play().then(() => {
+      isBgmPlaying = true;
+      vinylRecord.classList.add('spinning');
+      updatePlayBtnIcon(true);
+    }).catch(err => console.log(err));
+  }
+
+  btnToggleVoicePlayback.addEventListener('click', () => {
+    if (isVoicePlaying) {
+      pauseVoicePlayback();
+    } else {
+      startVoicePlayback();
+    }
+  });
+
+  function startVoicePlayback() {
     voiceAudio.play().then(() => {
       isVoicePlaying = true;
-      voiceWaveform.classList.add('active');
-      voiceProgressBox.classList.add('active');
-      voiceBtnText.textContent = 'Jeda Pesan Suara ⏸️';
-      voicePlayIcon.innerHTML = `<rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect>`;
+      voiceToggleIcon.innerHTML = `<rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect>`;
+      voiceWaveform.style.visibility = 'visible';
     }).catch(err => {
-      console.log('Error playing voice:', err);
+      console.log('Voice audio play blocked:', err);
     });
   }
 
-  function pauseVoiceNote() {
+  function pauseVoicePlayback() {
     voiceAudio.pause();
     isVoicePlaying = false;
-    voiceWaveform.classList.remove('active');
-    voiceBtnText.textContent = 'Lanjutkan Pesan Suara ▶️';
-    voicePlayIcon.innerHTML = `<polygon points="5 3 19 12 5 21 5 3"></polygon>`;
+    voiceToggleIcon.innerHTML = `<polygon points="5 3 19 12 5 21 5 3"></polygon>`;
   }
 
-  // Voice Note Time Update
   voiceAudio.addEventListener('timeupdate', () => {
     if (voiceAudio.duration) {
       const pct = (voiceAudio.currentTime / voiceAudio.duration) * 100;
@@ -360,49 +375,36 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // When Voice Note Finishes (Requirement 6)
+  // When Voice Note Finishes: Cat Runs Away ("Kabur")!
   voiceAudio.addEventListener('ended', () => {
     isVoicePlaying = false;
-    voiceWaveform.classList.remove('active');
-    voiceBtnText.textContent = 'Putar Ulang Pesan Suara 💕';
-    voicePlayIcon.innerHTML = `<polygon points="5 3 19 12 5 21 5 3"></polygon>`;
+    voiceToggleIcon.innerHTML = `<polygon points="5 3 19 12 5 21 5 3"></polygon>`;
 
-    // Cat fades out smoothly
-    sittingCatCaption.textContent = 'Selesai didengar! Senang banget... 🥰';
+    // Cat switches to running GIF & animates dashing away
+    voiceCatImg.src = './assets/run.gif';
+    voiceCatImg.classList.add('cat-kabur');
+    voiceCatCaption.textContent = 'Kucingnya kabur! Wuuush~ 💨😹';
+
+    triggerCelebrationConfetti();
+    playPopSound();
+
+    // After 2.5s, close modal & resume BGM
     setTimeout(() => {
-      sittingCatBox.classList.add('fade-out');
-    }, 1000);
-
-    // End cinema mode
-    setTimeout(() => {
-      document.body.classList.remove('cinema-mode-active');
-      triggerCelebrationConfetti();
-
-      // Resume BGM smoothly
-      bgAudio.play().then(() => {
-        isBgmPlaying = true;
-        vinylRecord.classList.add('spinning');
-        updatePlayBtnIcon(true);
-      }).catch(e => console.log(e));
-    }, 1800);
+      closeVoiceModal();
+    }, 2500);
   });
 
   // ==========================================
-  // Requirement 7: Festive Candle Blowing (Meriah & Ringan)
+  // Festive Candle Blowing
   // ==========================================
   cakeBox.addEventListener('click', () => {
     if (candlesBlown) return;
     candlesBlown = true;
 
-    // Blow candles
     document.querySelectorAll('.candle').forEach(c => c.classList.add('blown'));
-    
-    // Play Festive Fanfare
     playFestiveFanfare();
 
-    // Meriah Confetti Cannons (Left, Right, Center)
     if (typeof confetti === 'function') {
-      // Left cannon
       confetti({
         particleCount: 80,
         angle: 60,
@@ -410,7 +412,6 @@ document.addEventListener('DOMContentLoaded', () => {
         origin: { x: 0, y: 0.7 },
         colors: ['#ff4d88', '#ffccd9', '#ffffff', '#ffd700']
       });
-      // Right cannon
       confetti({
         particleCount: 80,
         angle: 120,
@@ -418,7 +419,6 @@ document.addEventListener('DOMContentLoaded', () => {
         origin: { x: 1, y: 0.7 },
         colors: ['#ff4d88', '#ffccd9', '#ffffff', '#ffd700']
       });
-      // Center starburst
       setTimeout(() => {
         confetti({
           particleCount: 100,
@@ -433,7 +433,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ==========================================
-  // Requirement 9: Persistent Peluk & Cium Counter
+  // Persistent Peluk & Cium Counter
   // ==========================================
   btnBurstLove.addEventListener('click', (e) => {
     loveCount += 1;
@@ -451,7 +451,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ==========================================
-  // Requirement 5: Photo Lightbox Preview
+  // Photo Lightbox Preview
   // ==========================================
   document.querySelectorAll('.polaroid-card').forEach(card => {
     card.addEventListener('click', () => {
@@ -469,7 +469,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ==========================================
-  // Requirement 4: Single BGM Player Controls
+  // Single BGM Player Controls
   // ==========================================
   function updatePlayBtnIcon(playing) {
     if (playing) {
@@ -486,9 +486,8 @@ document.addEventListener('DOMContentLoaded', () => {
       vinylRecord.classList.remove('spinning');
       updatePlayBtnIcon(false);
     } else {
-      // If voice is currently playing, pause voice first
       if (isVoicePlaying) {
-        pauseVoiceNote();
+        pauseVoicePlayback();
       }
       bgAudio.play().then(() => {
         isBgmPlaying = true;

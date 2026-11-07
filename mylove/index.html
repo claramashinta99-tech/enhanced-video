@@ -26,12 +26,62 @@
   <!-- Floating Heart Background Particles -->
   <canvas id="heartCanvas"></canvas>
 
-  <!-- Cinema Focus Overlay for Voice Note -->
-  <div id="voiceCinemaOverlay"></div>
-
   <!-- Photo Lightbox Modal -->
   <div class="lightbox-overlay" id="photoLightbox" title="Klik di mana saja untuk menutup">
     <img src="" alt="Full view" class="lightbox-img" id="lightboxImg">
+  </div>
+
+  <!-- ==========================================
+       FULLSCREEN VOICE CINEMA MODAL (BLURRED BACKGROUND)
+       ========================================== -->
+  <div class="voice-cinema-modal" id="voiceCinemaModal">
+    <!-- Exit X button in top right -->
+    <button type="button" class="btn-close-voice-modal" id="btnCloseVoiceModal" title="Tutup / Kembali ke Halaman Utama" aria-label="Close">
+      ✕
+    </button>
+
+    <div class="voice-modal-content">
+      <!-- Cat Container (Sitting while playing, runs away when finished) -->
+      <div class="voice-cat-container" id="voiceCatContainer">
+        <img src="./assets/sit.gif" class="voice-cat-img" id="voiceCatImg" alt="Sitting Smiling Cat">
+        <div class="voice-cat-caption" id="voiceCatCaption">Duduk manis dengerin suara sayang... 🐱💕</div>
+      </div>
+
+      <h3 class="voice-title">Pesan Suara Dari Hatiku 🎙️💕</h3>
+      <p class="voice-sub">Hallo sayangkuuuu coba dengerin ini hehehe 💖</p>
+
+      <audio id="voiceAudio" src="./assets/myvoice.m4a" preload="auto"></audio>
+
+      <!-- Soundwave Visualizer -->
+      <div class="voice-waveform" id="voiceWaveform">
+        <div class="voice-bar"></div>
+        <div class="voice-bar"></div>
+        <div class="voice-bar"></div>
+        <div class="voice-bar"></div>
+        <div class="voice-bar"></div>
+        <div class="voice-bar"></div>
+        <div class="voice-bar"></div>
+        <div class="voice-bar"></div>
+      </div>
+
+      <!-- Play/Pause Controls inside Modal -->
+      <div class="voice-controls-row">
+        <button type="button" class="btn-voice-toggle" id="btnToggleVoicePlayback" aria-label="Play or pause voice note">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" id="voiceToggleIcon">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Voice Progress Scrubber -->
+      <div class="progress-row">
+        <span class="time-text" id="voiceCurrentTime">0:00</span>
+        <div class="progress-track" id="voiceProgressTrack">
+          <div class="progress-fill" id="voiceProgressFill"></div>
+        </div>
+        <span class="time-text" id="voiceDurationTime" style="text-align: right;">0:00</span>
+      </div>
+    </div>
   </div>
 
   <!-- ==========================================
@@ -172,54 +222,6 @@
       </div>
 
       <!-- ==========================================
-           VOICE NOTE CARD (CINEMA FOCUS MODE)
-           ========================================== -->
-      <div class="voice-section" id="voiceSection">
-        <div class="section-label">A Special Voice For You</div>
-        <h2 class="section-title">Pesan Suara Dari Hatiku 🎙️💕</h2>
-        <p class="section-sub">Dengarkan rekaman suara yang khusus aku buatkan hanya untukmu di hari spesial ini...</p>
-
-        <!-- Sitting Smiling Cat that waits while voice plays -->
-        <div class="sitting-cat-container" id="sittingCatBox">
-          <img src="./assets/sit.gif" class="sitting-cat-img" alt="Sitting Cat Smiling">
-          <span class="sitting-cat-caption" id="sittingCatCaption">Duduk manis dengerin suara sayang... 🐱💕</span>
-        </div>
-
-        <audio id="voiceAudio" src="./assets/myvoice.m4a" preload="auto"></audio>
-
-        <!-- Play Voice Button -->
-        <button type="button" class="btn-play-voice" id="btnPlayVoice">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" id="voicePlayIcon">
-            <polygon points="5 3 19 12 5 21 5 3"></polygon>
-          </svg>
-          <span id="voiceBtnText">Putar Pesan Suaraku 💕</span>
-        </button>
-
-        <!-- Sound Wave Visualizer -->
-        <div class="voice-waveform" id="voiceWaveform">
-          <div class="voice-bar"></div>
-          <div class="voice-bar"></div>
-          <div class="voice-bar"></div>
-          <div class="voice-bar"></div>
-          <div class="voice-bar"></div>
-          <div class="voice-bar"></div>
-          <div class="voice-bar"></div>
-          <div class="voice-bar"></div>
-        </div>
-
-        <!-- Voice Progress Scrubber -->
-        <div class="voice-progress-box" id="voiceProgressBox">
-          <div class="progress-row">
-            <span class="time-text" id="voiceCurrentTime">0:00</span>
-            <div class="progress-track" id="voiceProgressTrack">
-              <div class="progress-fill" id="voiceProgressFill"></div>
-            </div>
-            <span class="time-text" id="voiceDurationTime">0:00</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- ==========================================
            INTERACTIVE BIRTHDAY CAKE SECTION
            ========================================== -->
       <div class="cake-section">
@@ -298,7 +300,7 @@
       </div>
 
       <!-- ==========================================
-           LOVE LETTER SECTION
+           LOVE LETTER SECTION (REVISED TEXT)
            ========================================== -->
       <div class="letter-section">
         <div class="section-label" style="text-align: center;">Surat Cinta Spesial</div>
@@ -306,10 +308,9 @@
 
         <div class="letter-paper">
           <div class="letter-content" id="loveLetterBody">
-            Hai sayangku Elnitha,<br><br>
-            Di hari ulang tahunmu ini, aku cuma mau mengucapkan rasa syukur yang luar biasa karena kamu sudah hadir di hidupku. Kehadiranmu, tawamu yang renyah, dan senyuman manismu selalu berhasil bikin hari-hariku yang biasa jadi terasa begitu indah dan penuh warna.<br><br>
-            Semoga di usiamu yang baru ini, kamu senantiasa diberikan kesehatan, kelapangan hati, kebahagiaan yang melimpah, dan semua impian-impian besarmu tercapai satu per satu. Ingat ya, aku akan selalu ada di sini, di samping kamu, mendukung setiap langkahmu.<br><br>
-            Selamat ulang tahun, pacar tercantikku! I love you so much, more than words can ever say! 💖✨
+            Hai Sayangku Elnitha, Di hari ulang tahun sayang ini, aku cuma mau mengucapkan rasa bersyukur yang sangat luar biasa karena sayang sudah hadir di hidupku dan menjadi spark of my life. Kehadiran sayang, tawa sayang, dan senyum sayangku yg manis selalu berhasil membuat hariku menjadi lebih berwarna 💖<br><br>
+            Di usia sayang yang saat ini bertambah, sayang senantiasa diberikan kesehatan, kelapangan hati, kebahagiaan yang melimpah, dan semua impian-impian besar sayang tercapai satu-persatu. Ingat ya, sayang aku aka nselalu ada disini, disamping kamu, dan mendukung setiap langkah sayang.<br><br>
+            Selamat Ulang Tahun, My lovely person, My Petite Girl, I love you so much baby.. more than words can ever say!
           </div>
           <div class="letter-sign">
             forever and always my Elnitha! 💖✨
@@ -324,6 +325,21 @@
         <button type="button" class="btn-love-burst" id="btnBurstLove">
           <span>Kirim Peluk & Cium ke Aku</span>
           <span class="love-count-badge" id="loveCounter">0 Terkirim 💕</span>
+        </button>
+      </div>
+
+      <!-- ==========================================
+           VOICE NOTE CARD (PLACED AT THE VERY BOTTOM)
+           ========================================== -->
+      <div class="voice-bottom-card" id="voiceBottomCard">
+        <div class="section-label">A Special Voice For You</div>
+        <h2 class="section-title">Pesan Suara Dari Hatiku 🎙️💕</h2>
+        <p class="section-sub">Hallo sayangkuuuu coba dengerin ini hehehe 💖</p>
+        <button type="button" class="btn-play-voice-trigger" id="btnOpenVoiceModal">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+          <span>Putar Pesan Suaraku 💕</span>
         </button>
       </div>
 
