@@ -402,6 +402,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (candlesBlown) return;
     candlesBlown = true;
 
+    // Sembunyikan tombol "Ketuk Di Sini Untuk Meniup Lilin" ketika ditiup
+    const cakeBtn = document.getElementById('cakeBtn') || cakeBox.querySelector('.cake-btn');
+    if (cakeBtn) {
+      cakeBtn.style.display = 'none';
+    }
+
     document.querySelectorAll('.candle').forEach(c => c.classList.add('blown'));
     playFestiveFanfare();
 
