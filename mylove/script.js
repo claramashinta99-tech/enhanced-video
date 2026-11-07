@@ -48,6 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Music Player Elements
   const musicPlayer = document.getElementById('musicPlayer');
   const bgAudio = document.getElementById('bgAudio');
+  bgAudio.volume = 0.5; // Music volume lowered by 50%
   const vinylRecord = document.getElementById('vinylRecord');
   const playPauseBtn = document.getElementById('playPauseBtn');
   const playPauseIcon = document.getElementById('playPauseIcon');
