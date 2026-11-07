@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Happy Birthday, My Love 💖 | Private Love Sanctuary</title>
+  
+  <!-- Primary Meta Tags -->
+  <meta name="description" content="Situs ucapan selamat ulang tahun interaktif spesial untuk pacar tersayang.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💖</text></svg>">
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+  <!-- Canvas Confetti -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Floating Heart Background Particles -->
+  <canvas id="heartCanvas"></canvas>
+
+  <!-- ==========================================
+       STAGE 1: INTERACTIVE ENVELOPE (AMPLOP)
+       ========================================== -->
+  <section class="screen" id="stageEnvelope">
+    <div class="envelope-wrapper">
+      <!-- Cute Cat Peeking -->
+      <img src="./assets/both_cuddle.gif" class="cat-peek" alt="Cute Cat Love">
+
+      <!-- Interactive 3D Envelope -->
+      <div class="envelope-container" id="interactiveEnvelope" title="Ketuk untuk membuka amplop">
+        <div class="envelope-back"></div>
+        <div class="envelope-letter">
+          <div class="letter-heart">💌</div>
+          <div class="letter-title">Untuk Kamu Sayang</div>
+          <div class="letter-sub">Special Birthday Letter</div>
+        </div>
+        <div class="envelope-front-pocket"></div>
+        <div class="envelope-flap"></div>
+        <div class="wax-seal">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+          </svg>
+        </div>
+      </div>
+
+      <div class="envelope-caption">
+        Ketuk amplop di atas untuk membuka surat 💌
+        <span>Ada pesan rahasia yang menunggu kamu... ✨</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==========================================
+       STAGE 2: LOVE SECURITY CHECK (LOGIN PANEL)
+       ========================================== -->
+  <section class="screen hidden" id="stageLogin">
+    <div class="login-card" id="loginCard">
+      <!-- Cute Cat Tapping -->
+      <img src="./assets/taps.gif" class="login-cat" alt="Tapping Cat">
+
+      <div class="login-badge">
+        <span>🔒</span> Love Security System
+      </div>
+      <h2 class="login-title">Private Love Sanctuary</h2>
+      <p class="login-desc">Situs ini terkunci khusus hanya untuk gadis tercantik sedunia. Verifikasi identitasmu ya sayang 💕</p>
+
+      <form id="loginForm" autocomplete="off">
+        <!-- Username Field (Fixed) -->
+        <div class="input-group">
+          <label class="input-label">
+            <span>USERNAME</span>
+            <span style="color: var(--primary-pink); font-size: 11px;">✓ TERVERIFIKASI</span>
+          </label>
+          <div class="input-wrapper">
+            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+              <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+            <input type="text" class="form-input readonly" value="ILOVEUSOMUCH" readonly>
+          </div>
+        </div>
+
+        <!-- Password Field -->
+        <div class="input-group">
+          <div class="input-label">
+            <span>PASSWORD</span>
+            <button type="button" class="hint-trigger" id="hintBtn">
+              💡 Butuh Petunjuk Sandi?
+            </button>
+          </div>
+          <div class="input-wrapper">
+            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+            <input type="password" id="passwordInput" class="form-input" placeholder="Masukkan password rahasia kamu..." required>
+            <button type="button" class="toggle-password" id="togglePassword" aria-label="Toggle password visibility">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="3" r="3"></circle>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Unlock Button -->
+        <button type="submit" class="btn-primary" id="btnUnlock">
+          <span>Buka Hatiku / Masuk</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+            <polyline points="12 5 19 12 12 19"></polyline>
+          </svg>
+        </button>
+      </form>
+    </div>
+
+    <!-- Hint Modal Popup -->
+    <div class="modal-overlay" id="hintModal">
+      <div class="hint-modal-card">
+        <img src="./assets/both_box.gif" class="hint-cat" alt="Cute Cat Box">
+        <h3 style="font-size: 18px; font-weight: 800; color: #2d1827; margin-bottom: 8px;">Petunjuk Sandi Rahasia 🤫</h3>
+        <p class="hint-modal-text">( sandi adalah username roblox kamu sayang )</p>
+        <p class="hint-modal-sub">Ketik username akun Roblox kamu di kolom password yaa sayang! 🥺🎮💖</p>
+        <button type="button" class="btn-close-modal" id="closeHintBtn">Mengerti, Sayang! 🥰</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==========================================
+       STAGE 3: MAIN BIRTHDAY SANCTUARY
+       ========================================== -->
+  <section class="screen hidden" id="stageCelebration">
+    <div class="sanctuary-container">
+      
+      <!-- Hero Birthday Header Card -->
+      <div class="hero-card">
+        <div class="hero-badge">🌸 Special Birthday Celebration 🌸</div>
+        <h1 class="hero-title">Happy Birthday, My Prettiest Girl! 🎂✨</h1>
+        <div class="hero-romantic-text">You Make My World So Beautiful</div>
+        <p class="hero-subtitle">
+          Selamat bertambah usia untuk gadis paling menggemaskan dan paling spesial di dunia! Hari ini adalah hari kamu, nikmati setiap detik kebahagiaannya yaa sayang 💖
+        </p>
+
+        <!-- Cute Celebrating Cats -->
+        <div class="hero-cats-row">
+          <img src="./assets/both_excited.gif" class="celebrate-cat" alt="Excited Cat">
+          <img src="./assets/swing.gif" class="celebrate-cat" alt="Swing Cat">
+        </div>
+      </div>
+
+      <!-- Interactive Birthday Cake Section -->
+      <div class="cake-section">
+        <div class="section-label">Make A Wish Moment</div>
+        <h2 class="section-title">Tiup Lilin Ulang Tahunmu! 🎂</h2>
+        <p class="section-sub">Pejamkan matamu, buat satu permohonan tulus dari hatimu, lalu ketuk lilinnya untuk meniup! 🕯️✨</p>
+
+        <div class="cake-interactive-box" id="interactiveCake" title="Ketuk untuk meniup lilin!">
+          <!-- 3 Glowing Candles -->
+          <div class="candles-row">
+            <div class="candle">
+              <div class="candle-flame"></div>
+              <div class="candle-smoke">💨</div>
+            </div>
+            <div class="candle">
+              <div class="candle-flame"></div>
+              <div class="candle-smoke">💨</div>
+            </div>
+            <div class="candle">
+              <div class="candle-flame"></div>
+              <div class="candle-smoke">💨</div>
+            </div>
+          </div>
+
+          <!-- Cake Layers -->
+          <div class="cake-layers">
+            <div class="cake-top"></div>
+            <div class="cake-bottom"></div>
+            <div class="cake-plate"></div>
+          </div>
+
+          <button type="button" class="cake-btn">🌬️ Ketuk Di Sini Untuk Meniup Lilin</button>
+        </div>
+
+        <div id="cakeStatus" style="margin-top: 18px; font-size: 14px; color: var(--text-muted); line-height: 1.6;">
+          (Lilin masih menyala, ketuk untuk membuat permohonanmu)
+        </div>
+      </div>
+
+      <!-- Love Letter Section (Parchment Placeholder) -->
+      <div class="letter-section">
+        <div class="section-label" style="text-align: center;">Surat Cinta Spesial</div>
+        <h2 class="section-title" style="text-align: center; margin-bottom: 20px;">Sebuah Pesan Untukmu 💌</h2>
+
+        <div class="letter-paper">
+          <div class="letter-content" id="loveLetterBody">
+            Hai sayangku,<br><br>
+            Di hari ulang tahunmu ini, aku cuma mau mengucapkan rasa syukur yang luar biasa karena kamu sudah hadir di hidupku. Kehadiranmu, tawamu yang renyah, dan senyuman manismu selalu berhasil bikin hari-hariku yang biasa jadi terasa begitu indah dan penuh warna.<br><br>
+            Semoga di usiamu yang baru ini, kamu senantiasa diberikan kesehatan, kelapangan hati, kebahagiaan yang melimpah, dan semua impian-impian besarmu tercapai satu per satu. Ingat ya, aku akan selalu ada di sini, di samping kamu, mendukung setiap langkahmu.<br><br>
+            Selamat ulang tahun, pacar tercantikku! I love you so much, forever and always! 💖✨
+          </div>
+          <div class="letter-sign">
+            With all my love,<br>
+            Reyval 💕
+          </div>
+        </div>
+      </div>
+
+      <!-- Polaroid Photo Gallery (Placeholder) -->
+      <div class="gallery-section">
+        <div class="section-label">Our Sweet Memories</div>
+        <h2 class="section-title">Galeri Kenangan Kita 📸</h2>
+        <p class="section-sub">Kumpulan momen manis bersama gadis paling menggemaskan 🌸</p>
+
+        <div class="polaroid-grid">
+          <!-- Polaroid 1 -->
+          <div class="polaroid-card">
+            <div class="washi-tape"></div>
+            <div class="polaroid-img-box">
+              <img src="./assets/skip.gif" class="polaroid-cat-sticker" alt="Cat Skip">
+              <div class="polaroid-placeholder-text">Foto Kenangan Kita 1 📸<br><span style="font-size: 10px; color: var(--text-muted);">(Slot foto siap diisi)</span></div>
+            </div>
+            <div class="polaroid-caption">Our Favorite Moment ✨</div>
+          </div>
+
+          <!-- Polaroid 2 -->
+          <div class="polaroid-card">
+            <div class="washi-tape"></div>
+            <div class="polaroid-img-box">
+              <img src="./assets/both_cuddle.gif" class="polaroid-cat-sticker" alt="Cat Cuddle">
+              <div class="polaroid-placeholder-text">Foto Cantik Kamu 🌸<br><span style="font-size: 10px; color: var(--text-muted);">(Slot foto siap diisi)</span></div>
+            </div>
+            <div class="polaroid-caption">The Prettiest Smile 💖</div>
+          </div>
+
+          <!-- Polaroid 3 -->
+          <div class="polaroid-card">
+            <div class="washi-tape"></div>
+            <div class="polaroid-img-box">
+              <img src="./assets/both_box.gif" class="polaroid-cat-sticker" alt="Cat Box">
+              <div class="polaroid-placeholder-text">Momen Berdua Kita 💫<br><span style="font-size: 10px; color: var(--text-muted);">(Slot foto siap diisi)</span></div>
+            </div>
+            <div class="polaroid-caption">Forever With You 💕</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Interactive Love Burst Button -->
+      <div class="love-burst-section">
+        <button type="button" class="btn-love-burst" id="btnBurstLove">
+          <span>Kirim Peluk & Cium ke Aku</span>
+          <span class="love-count-badge" id="loveCounter">0 Terkirim 💕</span>
+        </button>
+      </div>
+
+      <!-- Footer Note -->
+      <footer style="text-align: center; margin-top: 40px; color: var(--text-muted); font-size: 12px; font-weight: 600;">
+        Crafted with endless love just for you • <span style="color: var(--primary-pink);">reyval.web.id/mylove</span> 💖
+      </footer>
+
+    </div>
+  </section>
+
+  <!-- ==========================================
+       MODERN 90'S ROMANTIC MUSIC PLAYER BAR (FLOATING)
+       ========================================== -->
+  <aside class="music-player-bar" id="musicPlayer">
+    <audio id="bgAudio" preload="auto"></audio>
+    <input type="file" id="customAudioInput" accept="audio/*">
+
+    <!-- Top Track Info & Play Controls -->
+    <div class="player-main-row">
+      <!-- Vinyl Record Icon -->
+      <div class="vinyl-box" id="vinylRecord">
+        <div class="vinyl-center"></div>
+      </div>
+
+      <!-- Track Name & Artist -->
+      <div class="track-info">
+        <div class="track-title" id="trackTitle">Kiss Me</div>
+        <div class="track-artist" id="trackArtist">Sixpence None The Richer (1997)</div>
+      </div>
+
+      <!-- Playback Buttons -->
+      <div class="player-controls">
+        <button class="btn-player" id="prevTrackBtn" title="Lagu Sebelumnya" aria-label="Previous track">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="19 20 9 12 19 4 19 20"></polygon>
+            <line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="2"></line>
+          </svg>
+        </button>
+
+        <button class="btn-player play-pause" id="playPauseBtn" title="Putar / Jeda" aria-label="Play or pause">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+        </button>
+
+        <button class="btn-player" id="nextTrackBtn" title="Lagu Selanjutnya" aria-label="Next track">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5 4 15 12 5 20 5 4"></polygon>
+            <line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Scrubber Progress Bar -->
+    <div class="progress-row">
+      <span class="time-text" id="currentTime">0:00</span>
+      <div class="progress-track" id="progressTrack">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <span class="time-text" id="durationTime" style="text-align: right;">3:18</span>
+    </div>
+
+    <!-- Playlist & Custom MP3 Controls -->
+    <div class="playlist-toggle-row">
+      <button type="button" class="playlist-btn" id="togglePlaylistBtn">
+        <span>📜 90's Playlist Romantis</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </button>
+
+      <button type="button" class="playlist-btn" id="uploadCustomAudioBtn" style="color: var(--text-dark);">
+        <span>🎵 Putar MP3 Sendiri</span>
+      </button>
+    </div>
+
+    <!-- Playlist Dropdown Drawer -->
+    <div class="playlist-menu" id="playlistMenu"></div>
+  </aside>
+
+  <!-- Script -->
+  <script src="script.js"></script>
+</body>
+</html>
